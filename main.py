@@ -56,6 +56,8 @@ visible_distances = []
 hovered_item = None
 view_mode = 0  # 0 = assigned colors, 1 = relative 4D position colors
 last_projected_points = []  # store for click detection
+dragging = False
+drag_start = None
 
 # Precompute visible points and distances
 def update_visible():
@@ -133,6 +135,32 @@ while running:
             sin_a * camera_pos[0] + cos_a * camera_pos[3]
         ])
 
+    # Handle drag rotation
+    if dragging and drag_start is not None:
+        mx, my = pygame.mouse.get_pos()
+        dx = (mx - drag_start[0]) * 0.005  # horizontal drag → xy rotation
+        dy = (my - drag_start[1]) * 0.005  # vertical drag → xz rotation
+
+        # Apply rotation in xy plane from horizontal drag
+        if abs(dx) > 1e-6:
+            cos_a, sin_a = np.cos(dx), np.sin(dx)
+            camera_pos = np.array([
+                cos_a * camera_pos[0] - sin_a * camera_pos[1],
+                sin_a * camera_pos[0] + cos_a * camera_pos[1],
+                camera_pos[2],
+                camera_pos[3]
+            ])
+
+        # Apply rotation in xz plane from vertical drag
+        if abs(dy) > 1e-6:
+            cos_a, sin_a = np.cos(dy), np.sin(dy)
+            camera_pos = np.array([
+                cos_a * camera_pos[0] - sin_a * camera_pos[2],
+                camera_pos[1],
+                sin_a * camera_pos[0] + cos_a * camera_pos[2],
+                camera_pos[3]
+            ])
+
     camera_pos /= np.linalg.norm(camera_pos)
     update_visible()
 
@@ -151,32 +179,45 @@ while running:
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
                 mx, my = event.pos
-                if mx > SCREEN_WIDTH - 300:
-                    # Click in list area
-                    item_idx = (my - 100) // 25 + list_scroll
-                    if 0 <= item_idx < len(visible_indices):
-                        travel_target = points[visible_indices[item_idx]]
-                        traveling = True
-                        travel_progress = 0.0
-                elif last_projected_points:
-                    # Click in visual area — find nearest point
-                    best_dist_sq = float("inf")
-                    best_idx = None
-                    for p2d, ang, dep, idx in last_projected_points:
-                        dx, dy = mx - p2d[0], my - p2d[1]
-                        d_sq = dx * dx + dy * dy
-                        if d_sq < best_dist_sq:
-                            best_dist_sq = d_sq
-                            best_idx = idx
-                    if best_idx is not None and best_dist_sq < 400:  # within 20px
-                        travel_target = points[best_idx]
-                        traveling = True
-                        travel_progress = 0.0
+                dragging = True
+                drag_start = (mx, my)
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:  # Left click release
+                if dragging and drag_start is not None:
+                    # Only trigger click-to-travel if drag distance was minimal
+                    mx, my = event.pos
+                    drag_dist_sq = (mx - drag_start[0]) ** 2 + (my - drag_start[1]) ** 2
+                    if drag_dist_sq < 100:  # within 10px threshold
+                        if mx > SCREEN_WIDTH - 300:
+                            # Click in list area
+                            item_idx = (my - 100) // 25 + list_scroll
+                            if 0 <= item_idx < len(visible_indices):
+                                travel_target = points[visible_indices[item_idx]]
+                                traveling = True
+                                travel_progress = 0.0
+                        elif last_projected_points:
+                            # Click in visual area — find nearest point
+                            best_dist_sq = float("inf")
+                            best_idx = None
+                            for p2d, ang, dep, idx in last_projected_points:
+                                dx, dy = mx - p2d[0], my - p2d[1]
+                                d_sq = dx * dx + dy * dy
+                                if d_sq < best_dist_sq:
+                                    best_dist_sq = d_sq
+                                    best_idx = idx
+                            if best_idx is not None and best_dist_sq < 400:  # within 20px
+                                travel_target = points[best_idx]
+                                traveling = True
+                                travel_progress = 0.0
+                dragging = False
+                drag_start = None
         elif event.type == pygame.MOUSEMOTION:
             mx, my = event.pos
-            if mx > SCREEN_WIDTH - 300:
+            if not dragging and mx > SCREEN_WIDTH - 300:
                 item_idx = (my - 100) // 25 + list_scroll
                 hovered_item = item_idx if 0 <= item_idx < len(visible_indices) else None
+            elif dragging:
+                hovered_item = None
 
     # Update travel
     if traveling and travel_target is not None:
@@ -321,7 +362,7 @@ while running:
     screen.blit(status_text, (10, 10))
 
     controls = [
-        "WASD: Rotate XY/XZ planes | Q/E: Rotate XW plane",
+        "WASD: Rotate XY/XZ planes | Q/E: Rotate XW plane | Drag: Rotate camera",
         "UP/DOWN: Scroll list | Click: Travel to point | V: Toggle view",
     ]
     for i, ctrl in enumerate(controls):
