@@ -43,6 +43,23 @@ LIST_ITEM_HOVER = (80, 80, 120)
 NUM_POINTS = 300
 FOV_ANGLE = 0.5  # radians
 
+# Distance color mapping: green (0) -> yellow (0.3) -> red (0.5+)
+def distance_to_color(dist):
+    """Map angular distance to RGB color gradient."""
+    if dist <= 0.3:
+        # Green to yellow: 0 to 0.3
+        t = dist / 0.3
+        r = int(255 * t)
+        g = 255
+        b = 0
+    else:
+        # Yellow to red: 0.3 to 0.5+
+        t = min(1.0, (dist - 0.3) / 0.2)
+        r = 255
+        g = int(255 * (1 - t))
+        b = 0
+    return (r, g, b)
+
 player_pos = np.array([1.0, 0.0, 0.0, 0.0])
 _t = 0.15
 camera_pos = np.array([np.cos(_t), 0.0, np.sin(_t), 0.0])
@@ -325,6 +342,22 @@ while running:
                 hover_dist_sq_min = dist_sq
                 hover_point = (p2d, angular_dist, idx)
 
+    # Draw white circle around hovered list item point
+    if hovered_item is not None and 0 <= hovered_item < len(visible_indices):
+        hovered_point_idx = visible_indices[hovered_item]
+        for p2d, angular_dist, depth, idx in projected_points:
+            if idx == hovered_point_idx:
+                # Draw 50% transparent white circle outline around the point
+                max_distance = FOV_ANGLE
+                normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
+                radius = int(2 + normalized_dist * 5)
+                circle_radius = radius + 8
+                # Create temporary surface for transparent circle
+                temp_surf = pygame.Surface((circle_radius * 2 + 4, circle_radius * 2 + 4), pygame.SRCALPHA)
+                pygame.draw.circle(temp_surf, (255, 255, 255, 128), (circle_radius + 2, circle_radius + 2), circle_radius, 2)
+                screen.blit(temp_surf, (int(p2d[0]) - circle_radius - 2, int(p2d[1]) - circle_radius - 2))
+                break
+
     # Draw camera position crosshair at center of view area
     center_x, center_y = view_width // 2, SCREEN_HEIGHT // 2
     crosshair_radius = 12
@@ -401,8 +434,12 @@ while running:
         identicon = point_identicons[point_idx]
         screen.blit(identicon, (SCREEN_WIDTH - 285, y + 4))
 
-        text = font.render(label, True, TEXT_COLOR)
-        screen.blit(text, (SCREEN_WIDTH - 250, y + 12))
+        # Render name and distance separately with distance colored by gradient
+        name_text = font.render(name, True, TEXT_COLOR)
+        dist_color = distance_to_color(dist)
+        dist_text = font.render(f"({dist:.2f})", True, dist_color)
+        screen.blit(name_text, (SCREEN_WIDTH - 250, y + 12))
+        screen.blit(dist_text, (SCREEN_WIDTH - 250 + name_text.get_width() + 4, y + 12))
 
     # Draw status and controls
     mode_label = "Assigned" if view_mode == 0 else "4D Position"
