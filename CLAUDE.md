@@ -58,28 +58,42 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 
 ### Files
 - `main.py` — Game loop, rendering, UI, input handling
-- `sphere.py` — S³ math (point generation, distance, slerp, tangent space projection, name generation, colors)
+- `sphere.py` — S³ math (point generation, distance, slerp, tangent space projection, name decoding, colors)
+- `test_sphere.py` — Unit tests (point count, FOV visibility, travel speed, name format, travel queue)
 - `.gitignore` — venv exclusions
 
+### Scale
+- **30,000 points** uniformly distributed on S³ surface
+- **FOV: 0.116 rad** (~6.6°) — tuned to show ~10 visible points at once
+- **Travel speed:** 0.000008 per frame (5x slower than original)
+- **Projection scale:** 2500 (10x original for narrow FOV)
+- **Camera distance:** 0.08 rad from player (reduced from 0.15 for tight framing)
+
 ### Features
-- **300 points** randomly distributed on S³ surface
-- **Tangent space projection:** Points projected into camera's local tangent plane, so nearby points cluster around crosshair
-- **Named points:** Procedurally generated futuristic names (Core+End Suffix pattern, 90% 3-syllable / 10% 2-syllable)
-- **Colored points:** Random HSV colors with consistent brightness; depth-modulated rendering
+- **Lazy identicon generation:** 32×32 identicons cached on-demand with LRU eviction, never all 30k at startup
+- **Lazy name generation:** 11.8M unique name space (4 regions: core+end+suffix+number, core+end+suffix, core+suffix+number, core+suffix). Numbers always appended after word suffixes, never replacing them. Keys sampled once at startup, decoded deterministically per point
+- **Tangent space projection:** Points projected into camera's local tangent plane, so visible points cluster around crosshair
+- **Colored points:** Random HSV colors with consistent brightness; distance-modulated rendering
 - **Two view modes** (toggle V):
   - Assigned: permanent random colors per point
-  - 4D Position: color derived from relative XYZW offset to camera (R=X, G=Y, B=Z, W=brightness)
+  - 4D Position: color derived from normalized relative 4D direction (shows which direction in 4D space)
 - **Navigation:** Click points in view or list to travel (slerp interpolation); WASD/QE rotate camera in 4D planes
+  - Travel completes at 0.02 rad proximity (snap to target) → pop animation (400ms expanding fade-out circle)
+  - Travel target marked with `<` in list and 3 rotating blue triangles in view (6s rotation)
+  - **Travel queue:** Clicking a new target while traveling queues it; travel starts after arriving at current target. Queued target shown with `<<` in list (blue)
 - **UI:** Crosshair at camera position, scrollable distance-sorted list with color swatches, hover tooltips
+- **Distance color gradient:** Green (0% of LoS) → Yellow (60% of LoS) → Red (100% of LoS)
+- **Distance display:** mrad for distances < 1 rad, rad for >= 1 rad
 
 ### Controls
-| Key | Action |
-|-----|--------|
+| Input | Action |
+|-------|--------|
 | W/S | Rotate XY plane |
 | A/D | Rotate XZ plane |
 | Q/E | Rotate XW plane |
-| V | Toggle view mode |
+| V | Toggle view mode (Assigned ↔ 4D Position) |
 | UP/DOWN | Scroll point list |
+| Drag | Rotate camera (XY + XZ planes) |
 | Left click (view) | Travel to nearest point |
 | Left click (list) | Travel to selected point |
 
@@ -87,7 +101,10 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 
 ## Implementation Notes
 
-- Tangent space projection: 3 orthonormal basis vectors perpendicular to camera in ℝ⁴, points projected onto basis scaled by angular distance
+- **Tangent space projection:** 3 orthonormal basis vectors perpendicular to camera in ℝ⁴, points projected onto basis scaled by angular distance
+- **Name key sampling:** `np.random.choice(TOTAL_NAMES, 30000, replace=False)` at startup with fixed seed (42) ensures deterministic, collision-free 30k unique names from 11.8M name space
+- **Lazy caching:** Both identicons and names cached separately with LRU eviction in `update_visible()` to keep memory bounded
+- **Travel completion:** Snaps to target at < 0.02 rad proximity, fires pop animation. If a queued target exists, immediately begins traveling to it
 - Keep 4D rotation math clean and testable
 - Minimize over-engineering: navigation + rendering first, fancy visuals second
 

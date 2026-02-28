@@ -8,11 +8,15 @@ SYLLABLES_CORE = [
     "eth", "lum", "obsi", "arc", "plas", "spec", "res", "cel", "harm", "vel",
     "hor", "aur", "tem", "crys", "mag", "pho", "meta", "ech", "quan", "fluc",
     "thro", "aster", "cosm", "dimen", "syn", "holo", "vir", "ultra", "cyber", "omni",
+    "zeph", "lux", "astr", "vex", "sol", "iris", "mer", "pax", "volt", "rift",
+    "ion", "zap", "nova", "frac", "stra",
 ]
 
 SYLLABLES_END = [
     "va", "tum", "ter", "sar", "dor", "nis", "lex", "trix", "tron", "plex",
     "lis", "ris", "sis", "tis", "mas", "tas", "nus", "dus", "mus", "lus",
+    "kir", "zex", "vor", "keth", "nix", "ath", "orm", "yx", "eth", "ism",
+    "ada", "ora", "ina", "ura", "ess",
 ]
 
 SUFFIXES = [
@@ -23,24 +27,53 @@ SUFFIXES = [
     "Drift", "Void", "Deep", "High", "Rise", "Fall", "Mark", "Call", "Veil", "Shade",
 ]
 
+# Name space: 4 regions (numbers always after suffix, never replacing)
+# 1. core+end Suffix NN  (65*35*50*100 = 11,375,000)
+# 2. core+end Suffix      (65*35*50    =    113,750)
+# 3. core Suffix NN       (65*50*100   =    325,000)
+# 4. core Suffix           (65*50      =      3,250)
+_N_CORE = len(SYLLABLES_CORE)
+_N_END = len(SYLLABLES_END)
+_N_SUF = len(SUFFIXES)
+THREE_NUM = _N_CORE * _N_END * _N_SUF * 100
+THREE_PLAIN = _N_CORE * _N_END * _N_SUF
+TWO_NUM = _N_CORE * _N_SUF * 100
+TWO_PLAIN = _N_CORE * _N_SUF
+TOTAL_NAMES = THREE_NUM + THREE_PLAIN + TWO_NUM + TWO_PLAIN
 
-def generate_futuristic_name(rng=None):
-    """Generate a random futuristic name: (Core+End) + Suffix, with 10% chance of just Core+Suffix."""
-    if rng is None:
-        rng = np.random
 
-    if rng.random() < 0.1:
-        # 10%: 2-part name (Core + Suffix)
-        core = rng.choice(SYLLABLES_CORE)
-        suffix = rng.choice(SUFFIXES)
-        return core[0].upper() + core[1:] + " " + suffix
-    else:
-        # 90%: 3-part name (Core + End + Suffix)
-        core = rng.choice(SYLLABLES_CORE)
-        end = rng.choice(SYLLABLES_END)
-        suffix = rng.choice(SUFFIXES)
-        word = core + end
-        return word[0].upper() + word[1:] + " " + suffix
+def decode_name(key):
+    """Decode an integer 0..TOTAL_NAMES-1 into a deterministic futuristic name."""
+    if key < THREE_NUM:
+        num = key % 100
+        key //= 100
+        suf = key % _N_SUF
+        key //= _N_SUF
+        end = key % _N_END
+        core = key // _N_END
+        word = SYLLABLES_CORE[core] + SYLLABLES_END[end]
+        return f"{word[0].upper()}{word[1:]} {SUFFIXES[suf]} {num:02d}"
+    key -= THREE_NUM
+    if key < THREE_PLAIN:
+        suf = key % _N_SUF
+        key //= _N_SUF
+        end = key % _N_END
+        core = key // _N_END
+        word = SYLLABLES_CORE[core] + SYLLABLES_END[end]
+        return f"{word[0].upper()}{word[1:]} {SUFFIXES[suf]}"
+    key -= THREE_PLAIN
+    if key < TWO_NUM:
+        num = key % 100
+        key //= 100
+        suf = key % _N_SUF
+        core = key // _N_SUF
+        c = SYLLABLES_CORE[core]
+        return f"{c[0].upper()}{c[1:]} {SUFFIXES[suf]} {num:02d}"
+    key -= TWO_NUM
+    suf = key % _N_SUF
+    core = key // _N_SUF
+    c = SYLLABLES_CORE[core]
+    return f"{c[0].upper()}{c[1:]} {SUFFIXES[suf]}"
 
 
 def random_point_on_s3(count=1):
@@ -126,7 +159,7 @@ def project_to_tangent(cam, point, basis):
     return coords * angle
 
 
-def project_tangent_to_screen(tangent_xyz, screen_width, screen_height, scale=250):
+def project_tangent_to_screen(tangent_xyz, screen_width, screen_height, scale=2500):
     """Project tangent space (x, y, z) to 2D screen coordinates."""
     cx, cy = screen_width / 2, screen_height / 2
     x = cx + tangent_xyz[0] * scale
