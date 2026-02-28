@@ -32,7 +32,7 @@ LIST_ITEM_HOVER = (80, 80, 120)
 
 # Game state
 NUM_POINTS = 300
-FOV_ANGLE = np.pi / 2  # 90 degrees
+FOV_ANGLE = 0.5  # radians
 
 camera_pos = np.array([1.0, 0.0, 0.0, 0.0])
 points = random_point_on_s3(NUM_POINTS)
@@ -47,7 +47,7 @@ point_colors = random_color(NUM_POINTS)  # Assign random colors
 traveling = False
 travel_target = None
 travel_progress = 0.0
-travel_speed = 0.0002  # per frame
+travel_speed = 0.00004  # per frame
 
 # UI state
 list_scroll = 0
@@ -140,7 +140,7 @@ while running:
     if keys[pygame.K_UP]:
         list_scroll = max(0, list_scroll - 1)
     if keys[pygame.K_DOWN]:
-        list_scroll = min(max(0, len(visible_indices) - 10), list_scroll + 1)
+        list_scroll = min(max(0, len(visible_indices) - 20), list_scroll + 1)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -292,7 +292,7 @@ while running:
     screen.blit(header, (SCREEN_WIDTH - 290, 10))
 
     # Draw list items
-    for i in range(10):
+    for i in range(20):
         item_idx = list_scroll + i
         if item_idx >= len(visible_indices):
             break

@@ -1,0 +1,260 @@
+================================================================================
+  4-SPHERE (S³) PROJECTION RESEARCH: EXECUTIVE SUMMARY
+================================================================================
+
+PROJECT: 4-Sphere Explorer
+DATE: February 2026
+CURRENT IMPLEMENTATION: Tangent Space Projection
+STATUS: Researched 7 major projection methods with detailed comparisons
+
+================================================================================
+  QUICK FINDINGS
+================================================================================
+
+1. CURRENT CHOICE IS EXCELLENT
+   ✓ Tangent space projection is ideal for interactive real-time exploration
+   ✓ Angular distances preserved locally
+   ✓ No singularities in visible region
+   ✓ Intuitive camera-centric navigation
+   ✓ SLERP interpolation works perfectly
+
+2. STEREOGRAPHIC PROJECTION IS THE MATHEMATICAL ALTERNATIVE
+   ✓ Conformal (preserves angles globally)
+   ✓ Shows entire S³ except at projection pole
+   ✓ Single parameter: choose which axis is the pole (4 choices)
+   ✓ Easy to add as toggle switch
+   ✗ Extreme foreshortening near pole requires handling
+
+3. HOPF FIBRATION REVEALS HIDDEN STRUCTURE
+   ✓ Shows S³ is a fiber bundle of circles
+   ✓ Visually stunning linked tori patterns
+   ✓ Educational value for understanding topology
+   ✗ More complex to implement (Hopf map + stereographic)
+   ✗ Less useful for practical exploration
+
+4. ORTHOGONAL IS FASTEST BUT DISTORTS GEOMETRY
+   ✓ Trivial to implement (drop one coordinate)
+   ✓ Can show multiple projection axes simultaneously
+   ✓ No singularities
+   ✗ Not conformal (distorts angles)
+   ✗ Loses depth information in dropped axis
+
+5. SLICING IS INTUITIVE FOR DIMENSION TEACHING
+   ✓ Shows 3D cross-sections as w varies from -1 to +1
+   ✓ Naturally explains dimension reduction
+   ✓ Good for animated sequences
+   ✗ Loses continuity between slices
+   ✗ Not ideal for exploration
+
+6. QUATERNION REPRESENTATION CONNECTS TO PHYSICS
+   ✓ S³ ≅ SU(2) (fundamental in quantum mechanics)
+   ✓ Each point encodes a 3D rotation
+   ✓ No gimbal lock (unlike Euler angles)
+   ✓ SLERP gives shortest interpolation paths
+   ✗ Requires interpretation layer for visualization
+
+7. HYBRID APPROACHES OFFER MULTIPLE PERSPECTIVES
+   ✓ Dual-view: tangent space + stereographic simultaneously
+   ✓ Progressive disclosure: unlock features as understanding grows
+   ✓ Progressive UI: basic mode → intermediate → expert
+   ✗ More complex implementation and UI management
+
+================================================================================
+  MATHEMATICAL COMPARISON TABLE
+================================================================================
+
+Method              Conformal  Global  Singularities  Speed   Intuitive
+─────────────────────────────────────────────────────────────────────────
+Tangent Space       Local-yes  No      No             Fast    High
+Stereographic       Yes        Yes*    At pole        Medium  Medium
+Orthogonal          No         Yes     No             Fastest Low
+Hopf Fibration      Yes**      Yes*    At poles       Medium  Low
+Quaternion          Varies     Varies  No             Medium  Medium
+Slicing             N/A        Partial No             Fast    High
+
+*Except at projection pole
+**Inherits from stereographic projection
+
+================================================================================
+  IMPLEMENTATION PRIORITY RANKING
+================================================================================
+
+PHASE 1 (NOW): Keep current tangent space ✓
+  └─ Already optimal for core use case
+
+PHASE 2 (HIGH PRIORITY): Add stereographic toggle [1-2 hours]
+  ├─ Add stereographic_projection() function [20-30 lines]
+  ├─ Add view_mode selector [10 lines]
+  ├─ Handle pole clipping/coloring [15-20 lines]
+  └─ Benefits: Global view without abandoning current interaction model
+
+PHASE 3 (MEDIUM PRIORITY): Implement quaternion SLERP [2-3 hours]
+  ├─ Refactor camera from raw 4D rotation to quaternion [60 lines]
+  ├─ Implement quaternion arithmetic [40 lines]
+  ├─ Existing SLERP already works with quaternions
+  └─ Benefits: More elegant rotation representation, potential physics connections
+
+PHASE 4 (OPTIONAL): Hopf fibration visualization [3-4 hours]
+  ├─ Implement hopf_map() function [20-30 lines]
+  ├─ Implement hopf_to_color() [15-20 lines]
+  ├─ Optional: render fiber tubes [40-60 lines]
+  └─ Benefits: Reveals topology, educational value
+
+PHASE 5 (LOW PRIORITY): Multi-view UI [Not recommended yet]
+  ├─ Split screen into multiple projections [100+ lines]
+  ├─ Complex state management
+  └─ Benefits: Educational, but undermines focus on exploration
+
+================================================================================
+  SPECIFIC RECOMMENDATIONS FOR 4-SPHERE EXPLORER
+================================================================================
+
+SHORT TERM (Next session):
+1. Keep tangent space as primary mode (excellent choice)
+2. Document why this choice was made (now documented!)
+3. Plan Phase 2: stereographic toggle
+
+MEDIUM TERM (Next 2-3 weeks):
+1. Implement stereographic projection with pole handling
+2. Add keyboard toggle (e.g., 'T' for tangent, 'S' for stereographic)
+3. Auto-switch coloring appropriately for each mode
+4. Test edge cases (points near poles, antipodal points)
+
+LONG TERM (Future exploration):
+1. Add quaternion-based navigation (if rotating camera feels stiff)
+2. Optional: Hopf visualization as educational overlay
+3. Optional: Slicing mode for dimension-reduction teaching
+4. Consider: Progressive disclosure UI for feature discovery
+
+================================================================================
+  TECHNICAL NOTES
+================================================================================
+
+STEREOGRAPHIC POLE SELECTION:
+  Current code already supports choosing which axis is camera (pole selection).
+  To add stereographic with different poles:
+  
+  def stereographic_projection(point, pole_index=0):
+      # pole_index = 0: use x-axis as pole
+      # pole_index = 1: use y-axis as pole
+      # pole_index = 2: use z-axis as pole
+      # pole_index = 3: use w-axis as pole
+
+  Can implement as 4 separate stereographic views!
+
+QUATERNION ADOPTION:
+  Existing SLERP already works with quaternions.
+  Replace raw rotation matrices with:
+  
+    camera_quat = np.array([1, 0, 0, 0])  # identity
+    
+  Then:
+    camera_quat = quaternion_multiply(rotation_quat, camera_quat)
+  
+  Backward compatible with existing code.
+
+HOPF VISUALIZATION:
+  Requires:
+    1. Compute Hopf map for each visible point
+    2. Map S² coordinate to color
+    3. Apply to any projection method (tangent or stereographic)
+  
+  Non-intrusive: can be a coloring mode without changing projection.
+
+================================================================================
+  DOCUMENTATION FILES CREATED
+================================================================================
+
+1. PROJECTION_RESEARCH.md [Complete Reference]
+   └─ 2000+ lines covering all 7 methods
+   └─ Mathematical formulas with examples
+   └─ Strengths, weaknesses, and use cases for each
+   └─ Hybrid approaches and recommendations
+
+2. PROJECTION_QUICK_REFERENCE.md [Quick Navigation]
+   └─ One-page visual summary of each method
+   └─ Decision tree for choosing projection
+   └─ Complexity and performance metrics
+   └─ Implementation priority ranking
+
+3. IMPLEMENTATION_EXAMPLES.md [Code Snippets]
+   └─ Runnable Python code for each method
+   └─ Integration templates
+   └─ Unit test examples
+   └─ Testing checklist
+
+4. PROJECTION_VISUAL_GUIDE.md [Visual Understanding]
+   └─ ASCII diagrams for each method
+   └─ Step-by-step visual explanations
+   └─ "What you see" vs "what it means"
+   └─ Color coding reference guide
+
+================================================================================
+  KEY INSIGHTS
+================================================================================
+
+1. TANGENT SPACE IS NOT A LIMITATION
+   It's a design choice that aligns perfectly with interactive exploration.
+   The current implementation is mathematically sound and practically optimal.
+
+2. STEREOGRAPHIC PROJECTION IS THE NATURAL NEXT STEP
+   It's the "next level" projection: still elegant, but shows global structure.
+   Can be added without disrupting current code.
+
+3. S³ HAS MULTIPLE ASPECTS
+   Different projections reveal different truths:
+   • Tangent: local structure and neighborhood relationships
+   • Stereographic: conformal geometry and global topology
+   • Orthogonal: simple coordinate visualization
+   • Hopf: fiber bundle structure and hidden symmetry
+   • Slicing: dimension reduction and cross-sectional understanding
+
+4. QUATERNIONS ARE LURKING UNDERNEATH
+   The current SLERP is quaternion-based already.
+   S³ ≅ SU(2) is not academic—it's how rotations work.
+   Worth understanding even if not visualized explicitly.
+
+5. MATHEMATICAL ELEGANCE ≠ VISUAL CLARITY
+   Stereographic is conformal but foreshortens wildly.
+   Orthogonal is simple but distorts angles.
+   Tangent is local but intuitive.
+   Choice depends on what you want to communicate.
+
+================================================================================
+  REFERENCES & RESOURCES
+================================================================================
+
+Primary Sources:
+  • Stereographic Projection: https://en.wikipedia.org/wiki/Stereographic_projection
+  • 3-sphere: https://en.wikipedia.org/wiki/3-sphere
+  • Hopf fibration: https://en.wikipedia.org/wiki/Hopf_fibration
+  • Quaternions: https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
+  • Rotations in 4D: https://en.wikipedia.org/wiki/Rotations_in_4-dimensional_Euclidean_space
+
+Interactive Visualizations:
+  • 4D Stereographic: https://www.math.union.edu/~dpvc/math/4D/stereo-projection/
+  • Four-Space Visualization: https://hollasch.github.io/ray4/
+  • Interactive 4D Handbook: https://baileysnyder.com/interactive-4d/
+  • Hopf Fibration: https://nilesjohnson.net/hopf.html
+
+Code References:
+  • Hopf visualization: https://github.com/mwalczyk/hopf
+  • Tesseract Explorer: https://tsherif.github.io/tesseract-explorer/
+
+Papers:
+  • Schleimer & Segerman: "Sculptures in S³" (2012)
+  • Lyons: "An Elementary Introduction to the Hopf Fibration"
+
+================================================================================
+  CONTACT & FOLLOW-UP
+================================================================================
+
+This research provides a foundation for:
+  1. Understanding which projection method fits which use case
+  2. Implementing new methods when needed
+  3. Making informed decisions about visualization trade-offs
+  4. Teaching others about 4D geometry
+
+Next step: Implement Phase 2 (stereographic toggle) when ready.
+
+================================================================================
