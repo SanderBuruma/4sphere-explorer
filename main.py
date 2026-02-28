@@ -1,5 +1,7 @@
 import pygame
 import numpy as np
+from io import BytesIO
+from pydenticon import Generator
 from sphere import (
     random_point_on_s3,
     angular_distance,
@@ -17,6 +19,13 @@ pygame.init()
 SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 800
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("4-Sphere Explorer")
+
+# Generate window icon from game name
+icon_generator = Generator(8, 8, foreground=["#3498db", "#e74c3c", "#2ecc71"], background="#000000")
+icon_bytes = icon_generator.generate("4-Sphere", 64, 64, inverted=False)
+icon_surface = pygame.image.load(BytesIO(icon_bytes))
+pygame.display.set_icon(icon_surface)
+
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 14)
 
@@ -34,7 +43,9 @@ LIST_ITEM_HOVER = (80, 80, 120)
 NUM_POINTS = 300
 FOV_ANGLE = 0.5  # radians
 
-camera_pos = np.array([1.0, 0.0, 0.0, 0.0])
+player_pos = np.array([1.0, 0.0, 0.0, 0.0])
+_t = 0.15
+camera_pos = np.array([np.cos(_t), 0.0, np.sin(_t), 0.0])
 points = random_point_on_s3(NUM_POINTS)
 
 # Generate unique names
@@ -44,6 +55,23 @@ while len(point_names) < NUM_POINTS:
 point_names = list(point_names)
 
 point_colors = random_color(NUM_POINTS)  # Assign random colors
+
+# Generate identicons from point names using their assigned colors
+point_identicons = []
+for i, name in enumerate(point_names):
+    # Convert RGB tuple to hex color and generate color variations
+    r, g, b = point_colors[i]
+    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+    # Create a palette with the point color and its variations
+    foreground_colors = [hex_color]
+    generator = Generator(12, 12, foreground=foreground_colors, background="#000000")
+    png_bytes = generator.generate(name, 28, 28, inverted=False)
+    identicon_surface = pygame.image.load(BytesIO(png_bytes))
+    # Add 2px black margin around identicon
+    identicon_with_margin = pygame.Surface((32, 32))
+    identicon_with_margin.fill((0, 0, 0))
+    identicon_with_margin.blit(identicon_surface, (2, 2))
+    point_identicons.append(identicon_with_margin)
 traveling = False
 travel_target = None
 travel_progress = 0.0
@@ -62,8 +90,8 @@ drag_start = None
 # Precompute visible points and distances
 def update_visible():
     global visible_indices, visible_distances
-    vis_points, indices = visible_points(camera_pos, points, FOV_ANGLE)
-    distances = [angular_distance(camera_pos, points[i]) for i in indices]
+    vis_points, indices = visible_points(player_pos, points, FOV_ANGLE)
+    distances = [angular_distance(player_pos, points[i]) for i in indices]
     sorted_pairs = sorted(zip(indices, distances), key=lambda x: x[1])
     visible_indices = [p[0] for p in sorted_pairs]
     visible_distances = [p[1] for p in sorted_pairs]
@@ -165,10 +193,12 @@ while running:
     update_visible()
 
     # List scrolling
+    item_height = 40
+    max_items = (SCREEN_HEIGHT - 100) // item_height
     if keys[pygame.K_UP]:
         list_scroll = max(0, list_scroll - 1)
     if keys[pygame.K_DOWN]:
-        list_scroll = min(max(0, len(visible_indices) - 20), list_scroll + 1)
+        list_scroll = min(max(0, len(visible_indices) - max_items), list_scroll + 1)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -190,7 +220,7 @@ while running:
                     if drag_dist_sq < 100:  # within 10px threshold
                         if mx > SCREEN_WIDTH - 300:
                             # Click in list area
-                            item_idx = (my - 100) // 25 + list_scroll
+                            item_idx = (my - 100) // 40 + list_scroll
                             if 0 <= item_idx < len(visible_indices):
                                 travel_target = points[visible_indices[item_idx]]
                                 traveling = True
@@ -214,7 +244,7 @@ while running:
         elif event.type == pygame.MOUSEMOTION:
             mx, my = event.pos
             if not dragging and mx > SCREEN_WIDTH - 300:
-                item_idx = (my - 100) // 25 + list_scroll
+                item_idx = (my - 100) // 40 + list_scroll
                 hovered_item = item_idx if 0 <= item_idx < len(visible_indices) else None
             elif dragging:
                 hovered_item = None
@@ -223,12 +253,18 @@ while running:
     if traveling and travel_target is not None:
         travel_progress += travel_speed
         if travel_progress >= 1.0:
-            camera_pos = travel_target / np.linalg.norm(travel_target)
+            old_player = player_pos.copy()
+            player_pos = travel_target / np.linalg.norm(travel_target)
+            camera_pos = (camera_pos + (player_pos - old_player))
+            camera_pos /= np.linalg.norm(camera_pos)
             traveling = False
             travel_target = None
             update_visible()
         else:
-            camera_pos = slerp(camera_pos, travel_target, travel_progress)
+            old_player = player_pos.copy()
+            player_pos = slerp(player_pos, travel_target, travel_progress)
+            camera_pos = (camera_pos + (player_pos - old_player))
+            camera_pos /= np.linalg.norm(camera_pos)
 
     # Render
     screen.fill(BG_COLOR)
@@ -236,11 +272,14 @@ while running:
     # Project visible points into camera's tangent space
     view_width = SCREEN_WIDTH - 300
     basis = tangent_basis(camera_pos)
+    player_screen_offset = project_to_tangent(camera_pos, player_pos, basis)
 
     projected_points = []
     for i, idx in enumerate(visible_indices):
         p4d = points[idx]
         tangent_xyz = project_to_tangent(camera_pos, p4d, basis)
+        tangent_xyz[0] -= player_screen_offset[0]
+        tangent_xyz[1] -= player_screen_offset[1]
         p2d, depth = project_tangent_to_screen(tangent_xyz, view_width, SCREEN_HEIGHT)
         angular_dist = visible_distances[i]
         projected_points.append((p2d, angular_dist, depth, idx))
@@ -305,23 +344,31 @@ while running:
         label = f"{name} ({h_dist:.2f} rad)"
         label_surface = font.render(label, True, TEXT_COLOR)
         label_rect = label_surface.get_rect()
+        identicon = point_identicons[h_idx]
+
+        # Total width: identicon (32px) + gap (4px) + label
+        tooltip_width = 32 + 4 + label_rect.width
+        tooltip_height = max(32, label_rect.height)
 
         # Position tooltip above and to the right of cursor
         tx = int(hp2d[0]) + 12
         ty = int(hp2d[1]) - 20
 
         # Keep tooltip on screen
-        if tx + label_rect.width > view_width:
-            tx = int(hp2d[0]) - label_rect.width - 12
+        if tx + tooltip_width > view_width:
+            tx = int(hp2d[0]) - tooltip_width - 12
         if ty < 0:
             ty = int(hp2d[1]) + 12
 
         # Background
         padding = 4
-        bg_rect = pygame.Rect(tx - padding, ty - padding, label_rect.width + padding * 2, label_rect.height + padding * 2)
+        bg_rect = pygame.Rect(tx - padding, ty - padding, tooltip_width + padding * 2, tooltip_height + padding * 2)
         pygame.draw.rect(screen, (30, 30, 50), bg_rect)
         pygame.draw.rect(screen, point_colors[h_idx], bg_rect, 1)
-        screen.blit(label_surface, (tx, ty))
+
+        # Draw identicon and label
+        screen.blit(identicon, (tx, ty + (tooltip_height - 32) // 2))
+        screen.blit(label_surface, (tx + 32 + 4, ty + (tooltip_height - label_rect.height) // 2))
 
     # Draw divider line
     pygame.draw.line(
@@ -333,12 +380,14 @@ while running:
     screen.blit(header, (SCREEN_WIDTH - 290, 10))
 
     # Draw list items
-    for i in range(20):
+    item_height = 40
+    max_items = (SCREEN_HEIGHT - 100) // item_height
+    for i in range(max_items):
         item_idx = list_scroll + i
         if item_idx >= len(visible_indices):
             break
 
-        y = 100 + i * 25
+        y = 100 + i * item_height
         point_idx = visible_indices[item_idx]
         dist = visible_distances[item_idx]
         name = point_names[point_idx]
@@ -346,14 +395,14 @@ while running:
 
         # Highlight hovered
         item_bg = LIST_ITEM_HOVER if hovered_item == item_idx else LIST_ITEM_BG
-        pygame.draw.rect(screen, item_bg, (SCREEN_WIDTH - 290, y, 290, 24))
+        pygame.draw.rect(screen, item_bg, (SCREEN_WIDTH - 290, y, 290, item_height))
 
-        # Color swatch
-        color_swatch = point_colors[point_idx]
-        pygame.draw.rect(screen, color_swatch, (SCREEN_WIDTH - 285, y + 4, 14, 16))
+        # Identicon from point name
+        identicon = point_identicons[point_idx]
+        screen.blit(identicon, (SCREEN_WIDTH - 285, y + 4))
 
         text = font.render(label, True, TEXT_COLOR)
-        screen.blit(text, (SCREEN_WIDTH - 265, y + 5))
+        screen.blit(text, (SCREEN_WIDTH - 250, y + 12))
 
     # Draw status and controls
     mode_label = "Assigned" if view_mode == 0 else "4D Position"
