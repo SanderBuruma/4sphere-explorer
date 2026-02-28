@@ -45,6 +45,12 @@ LIST_ITEM_HOVER = (80, 80, 120)
 NUM_POINTS = 30_000
 FOV_ANGLE = 0.116  # radians, tuned for ~10 visible points
 GAME_SEED = 42
+ARRIVAL_THRESHOLD = 0.02  # radians — snap to target when this close
+CAMERA_OFFSET = 0.08  # radians — camera orbital distance from player
+ROTATION_SPEED = 0.02  # radians per frame for WASD/QE
+TRAVEL_SPEED = 0.000008  # slerp progress per frame
+POP_DURATION = 400  # milliseconds for arrival pop animation
+TRIANGLE_PERIOD = 6000.0  # milliseconds for one full triangle rotation
 
 # Distance color mapping: green (near) -> yellow (mid) -> red (far)
 def distance_to_color(dist):
@@ -66,8 +72,7 @@ def format_dist(rad):
     return f"{rad:.2f} rad"
 
 player_pos = np.array([1.0, 0.0, 0.0, 0.0])
-_t = 0.08  # camera distance from player (tuned for narrower FOV)
-camera_pos = np.array([np.cos(_t), 0.0, np.sin(_t), 0.0])
+camera_pos = np.array([np.cos(CAMERA_OFFSET), 0.0, np.sin(CAMERA_OFFSET), 0.0])
 points = random_point_on_s3(NUM_POINTS)
 
 # Name keys: map each point index to a unique name via combinatorial index
@@ -104,7 +109,7 @@ traveling = False
 travel_target = None
 travel_target_idx = None
 travel_progress = 0.0
-travel_speed = 0.000008  # per frame, 5x slower than before
+travel_speed = TRAVEL_SPEED
 queued_target = None
 queued_target_idx = None
 pop_animation_idx = None
@@ -147,7 +152,7 @@ while running:
     keys = pygame.key.get_pressed()
 
     # Camera rotation (6 degrees of freedom in 4D)
-    rotation_speed = 0.02
+    rotation_speed = ROTATION_SPEED
     if keys[pygame.K_w]:  # rotate in xy plane
         angle = rotation_speed
         cos_a, sin_a = np.cos(angle), np.sin(angle)
@@ -307,7 +312,7 @@ while running:
         camera_pos /= np.linalg.norm(camera_pos)
 
         # Complete travel at proximity threshold (snap to target)
-        if angular_distance(player_pos, travel_target) < 0.02:
+        if angular_distance(player_pos, travel_target) < ARRIVAL_THRESHOLD:
             old_player = player_pos.copy()
             player_pos = travel_target / np.linalg.norm(travel_target)
             camera_pos = (camera_pos + (player_pos - old_player))
@@ -410,12 +415,11 @@ while running:
     # Draw pop animation
     if pop_animation_idx is not None:
         elapsed_pop = pygame.time.get_ticks() - pop_animation_start_time
-        pop_duration = 400  # milliseconds
-        if elapsed_pop >= pop_duration:
+        if elapsed_pop >= POP_DURATION:
             pop_animation_idx = None
             pop_animation_start_time = None
         else:
-            progress = elapsed_pop / pop_duration
+            progress = elapsed_pop / POP_DURATION
             for p2d, angular_dist, depth, idx in projected_points:
                 if idx == pop_animation_idx:
                     max_distance = FOV_ANGLE
@@ -433,7 +437,7 @@ while running:
         for p2d, angular_dist, depth, idx in projected_points:
             if idx == travel_target_idx:
                 elapsed_ms = pygame.time.get_ticks() - start_time
-                rotation_angle = (elapsed_ms / 6000.0) * 2 * np.pi  # Full rotation every 6 seconds (3x slower)
+                rotation_angle = (elapsed_ms / TRIANGLE_PERIOD) * 2 * np.pi
                 max_distance = FOV_ANGLE
                 normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
                 radius = int(2 + normalized_dist * 5)

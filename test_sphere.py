@@ -8,6 +8,7 @@ from sphere import (
 NUM_POINTS = 30_000
 FOV_ANGLE = 0.116
 TRAVEL_SPEED = 0.000008
+ARRIVAL_THRESHOLD = 0.02
 OLD_TRAVEL_SPEED = 0.00004
 
 
@@ -93,15 +94,15 @@ class TestTravelQueue(unittest.TestCase):
     """Test travel completes at proximity and queue activates."""
 
     def test_arrival_at_proximity(self):
-        """Slerp travel must reach < 0.02 rad within reasonable progress."""
+        """Slerp travel must reach < ARRIVAL_THRESHOLD rad within reasonable progress."""
         player = np.array([1.0, 0.0, 0.0, 0.0])
         target = random_point_on_s3(1)
         for i in range(1, 10001):
             t = i * 0.0001
             pos = slerp(player, target, min(t, 1.0))
-            if angular_distance(pos, target) < 0.02:
+            if angular_distance(pos, target) < ARRIVAL_THRESHOLD:
                 break
-        self.assertLess(angular_distance(pos, target), 0.02)
+        self.assertLess(angular_distance(pos, target), ARRIVAL_THRESHOLD)
 
     def test_queue_activates_after_arrival(self):
         """Simulate: travel to A, queue B, arrive at A → traveling to B."""
@@ -119,7 +120,7 @@ class TestTravelQueue(unittest.TestCase):
         while True:
             travel_progress += 0.001
             pos = slerp(player, travel_target, min(travel_progress, 1.0))
-            if angular_distance(pos, travel_target) < 0.02:
+            if angular_distance(pos, travel_target) < ARRIVAL_THRESHOLD:
                 # Arrival: activate queue
                 travel_target = queued_target
                 queued_target = None
