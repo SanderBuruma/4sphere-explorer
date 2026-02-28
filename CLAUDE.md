@@ -40,8 +40,8 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - Or simple orthogonal projection + rotation visualization
 
 **Navigation:**
-- Rotations in 4D (6 independent planes: xy, xz, xw, yz, yw, zw)
-- Keyboard/mouse input → 4D rotation matrix → update surface
+- Rotations relative to camera's local orientation frame (persistent, co-rotated)
+- Keyboard/mouse input → frame rotation → update camera and tangent basis
 
 ---
 
@@ -58,8 +58,8 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 
 ### Files
 - `main.py` — Game loop, rendering, UI, input handling
-- `sphere.py` — S³ math (point generation, distance, slerp, tangent space projection, name decoding, colors)
-- `test_sphere.py` — Unit tests (point count, FOV visibility, travel speed, name format, travel queue)
+- `sphere.py` — S³ math (point generation, distance, slerp, tangent space projection, orientation frame rotation, name decoding, colors)
+- `test_sphere.py` — Unit tests (point count, FOV visibility, travel speed, name format, travel queue, rotation smoothness)
 - `.gitignore` — venv exclusions
 
 ### Scale
@@ -77,7 +77,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - **Two view modes** (toggle V):
   - Assigned: permanent random colors per point
   - 4D Position: color derived from normalized relative 4D direction (shows which direction in 4D space)
-- **Navigation:** Click points in view or list to travel (slerp interpolation); WASD/QE rotate camera in 4D planes
+- **Navigation:** Click points in view or list to travel (slerp interpolation); WASD/QE rotate camera relative to current orientation
   - Travel completes at 0.02 rad proximity (snap to target) → pop animation (400ms expanding fade-out circle)
   - Travel target marked with `<` in list and 3 rotating blue triangles in view (6s rotation)
   - **Travel queue:** Clicking a new target while traveling queues it; travel starts after arriving at current target. Queued target shown with `<<` in list (blue)
@@ -88,12 +88,12 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 ### Controls
 | Input | Action |
 |-------|--------|
-| W/S | Rotate XY plane |
-| A/D | Rotate XZ plane |
-| Q/E | Rotate XW plane |
+| W/S | Rotate up/down (relative to view) |
+| A/D | Rotate left/right (relative to view) |
+| Q/E | Rotate in 4D depth |
 | V | Toggle view mode (Assigned ↔ 4D Position) |
 | UP/DOWN | Scroll point list |
-| Drag | Rotate camera (XY + XZ planes) |
+| Drag | Rotate camera (relative to view) |
 | Left click (view) | Travel to nearest point |
 | Left click (list) | Travel to selected point |
 
@@ -101,7 +101,8 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 
 ## Implementation Notes
 
-- **Tangent space projection:** 3 orthonormal basis vectors perpendicular to camera in ℝ⁴, points projected onto basis scaled by angular distance
+- **Persistent orientation frame:** 4×4 orthogonal matrix (row 0 = camera, rows 1-3 = tangent basis). `rotate_frame()` applies exact planar rotations in the (camera, basis[i]) plane, co-rotating camera and tangent vectors. `reorthogonalize_frame()` corrects numerical drift via Gram-Schmidt from current frame vectors (not fixed standard basis), preserving orientation continuity. This replaces the old per-frame Gram-Schmidt approach which caused direction flipping when the camera moved away from standard basis axes.
+- **Tangent space projection:** 3 orthonormal basis vectors from orientation frame, perpendicular to camera in ℝ⁴, points projected onto basis scaled by angular distance
 - **Name key sampling:** `np.random.choice(TOTAL_NAMES, 30000, replace=False)` at startup with fixed seed (42) ensures deterministic, collision-free 30k unique names from 11.8M name space
 - **Lazy caching:** Both identicons and names cached separately with LRU eviction in `update_visible()` to keep memory bounded
 - **Travel completion:** Snaps to target at < 0.02 rad proximity, fires pop animation. If a queued target exists, immediately begins traveling to it

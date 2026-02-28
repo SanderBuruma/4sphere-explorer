@@ -7,6 +7,8 @@ from sphere import (
     angular_distance,
     visible_points,
     tangent_basis,
+    rotate_frame,
+    reorthogonalize_frame,
     project_to_tangent,
     project_tangent_to_screen,
     slerp,
@@ -73,6 +75,14 @@ def format_dist(rad):
 
 player_pos = np.array([1.0, 0.0, 0.0, 0.0])
 camera_pos = np.array([np.cos(CAMERA_OFFSET), 0.0, np.sin(CAMERA_OFFSET), 0.0])
+
+# Persistent orientation frame: row 0 = camera, rows 1-3 = tangent basis
+orientation = np.eye(4)
+orientation[0] = camera_pos.copy()
+_init_basis = tangent_basis(camera_pos)
+for _i in range(3):
+    orientation[_i + 1] = _init_basis[_i]
+
 points = random_point_on_s3(NUM_POINTS)
 
 # Name keys: map each point index to a unique name via combinatorial index
@@ -151,90 +161,33 @@ while running:
     # Handle input
     keys = pygame.key.get_pressed()
 
-    # Camera rotation (6 degrees of freedom in 4D)
+    # Camera rotation via persistent orientation frame
     rotation_speed = ROTATION_SPEED
-    if keys[pygame.K_w]:  # rotate in xy plane
-        angle = rotation_speed
-        cos_a, sin_a = np.cos(angle), np.sin(angle)
-        camera_pos = np.array([
-            cos_a * camera_pos[0] - sin_a * camera_pos[1],
-            sin_a * camera_pos[0] + cos_a * camera_pos[1],
-            camera_pos[2],
-            camera_pos[3]
-        ])
-    if keys[pygame.K_s]:  # rotate in xy plane (opposite)
-        angle = -rotation_speed
-        cos_a, sin_a = np.cos(angle), np.sin(angle)
-        camera_pos = np.array([
-            cos_a * camera_pos[0] - sin_a * camera_pos[1],
-            sin_a * camera_pos[0] + cos_a * camera_pos[1],
-            camera_pos[2],
-            camera_pos[3]
-        ])
-    if keys[pygame.K_a]:  # rotate in xz plane
-        angle = rotation_speed
-        cos_a, sin_a = np.cos(angle), np.sin(angle)
-        camera_pos = np.array([
-            cos_a * camera_pos[0] - sin_a * camera_pos[2],
-            camera_pos[1],
-            sin_a * camera_pos[0] + cos_a * camera_pos[2],
-            camera_pos[3]
-        ])
-    if keys[pygame.K_d]:  # rotate in xz plane (opposite)
-        angle = -rotation_speed
-        cos_a, sin_a = np.cos(angle), np.sin(angle)
-        camera_pos = np.array([
-            cos_a * camera_pos[0] - sin_a * camera_pos[2],
-            camera_pos[1],
-            sin_a * camera_pos[0] + cos_a * camera_pos[2],
-            camera_pos[3]
-        ])
-    if keys[pygame.K_q]:  # rotate in xw plane
-        angle = rotation_speed
-        cos_a, sin_a = np.cos(angle), np.sin(angle)
-        camera_pos = np.array([
-            cos_a * camera_pos[0] - sin_a * camera_pos[3],
-            camera_pos[1],
-            camera_pos[2],
-            sin_a * camera_pos[0] + cos_a * camera_pos[3]
-        ])
-    if keys[pygame.K_e]:  # rotate in xw plane (opposite)
-        angle = -rotation_speed
-        cos_a, sin_a = np.cos(angle), np.sin(angle)
-        camera_pos = np.array([
-            cos_a * camera_pos[0] - sin_a * camera_pos[3],
-            camera_pos[1],
-            camera_pos[2],
-            sin_a * camera_pos[0] + cos_a * camera_pos[3]
-        ])
+    if keys[pygame.K_w]:  # rotate up (screen Y)
+        rotate_frame(orientation, 2, -rotation_speed)
+    if keys[pygame.K_s]:  # rotate down
+        rotate_frame(orientation, 2, rotation_speed)
+    if keys[pygame.K_a]:  # rotate left (screen X)
+        rotate_frame(orientation, 1, -rotation_speed)
+    if keys[pygame.K_d]:  # rotate right
+        rotate_frame(orientation, 1, rotation_speed)
+    if keys[pygame.K_q]:  # rotate in 4D depth
+        rotate_frame(orientation, 3, rotation_speed)
+    if keys[pygame.K_e]:  # rotate in 4D depth (opposite)
+        rotate_frame(orientation, 3, -rotation_speed)
 
     # Handle drag rotation
     if dragging and drag_start is not None:
         mx, my = pygame.mouse.get_pos()
-        dx = (mx - drag_start[0]) * 0.005  # horizontal drag → xy rotation
-        dy = (my - drag_start[1]) * 0.005  # vertical drag → xz rotation
-
-        # Apply rotation in xy plane from horizontal drag
+        dx = (mx - drag_start[0]) * 0.005
+        dy = (my - drag_start[1]) * 0.005
         if abs(dx) > 1e-6:
-            cos_a, sin_a = np.cos(dx), np.sin(dx)
-            camera_pos = np.array([
-                cos_a * camera_pos[0] - sin_a * camera_pos[1],
-                sin_a * camera_pos[0] + cos_a * camera_pos[1],
-                camera_pos[2],
-                camera_pos[3]
-            ])
-
-        # Apply rotation in xz plane from vertical drag
+            rotate_frame(orientation, 1, dx)
         if abs(dy) > 1e-6:
-            cos_a, sin_a = np.cos(dy), np.sin(dy)
-            camera_pos = np.array([
-                cos_a * camera_pos[0] - sin_a * camera_pos[2],
-                camera_pos[1],
-                sin_a * camera_pos[0] + cos_a * camera_pos[2],
-                camera_pos[3]
-            ])
+            rotate_frame(orientation, 2, dy)
 
-    camera_pos /= np.linalg.norm(camera_pos)
+    reorthogonalize_frame(orientation)
+    camera_pos = orientation[0]
     update_visible()
 
     # List scrolling
@@ -308,15 +261,19 @@ while running:
         travel_progress += travel_speed
         old_player = player_pos.copy()
         player_pos = slerp(player_pos, travel_target, min(travel_progress, 1.0))
-        camera_pos = (camera_pos + (player_pos - old_player))
-        camera_pos /= np.linalg.norm(camera_pos)
+        delta = player_pos - old_player
+        orientation[0] += delta
+        reorthogonalize_frame(orientation)
+        camera_pos = orientation[0]
 
         # Complete travel at proximity threshold (snap to target)
         if angular_distance(player_pos, travel_target) < ARRIVAL_THRESHOLD:
             old_player = player_pos.copy()
             player_pos = travel_target / np.linalg.norm(travel_target)
-            camera_pos = (camera_pos + (player_pos - old_player))
-            camera_pos /= np.linalg.norm(camera_pos)
+            delta = player_pos - old_player
+            orientation[0] += delta
+            reorthogonalize_frame(orientation)
+            camera_pos = orientation[0]
             pop_animation_idx = travel_target_idx
             pop_animation_start_time = pygame.time.get_ticks()
 
@@ -339,7 +296,7 @@ while running:
 
     # Project visible points into camera's tangent space
     view_width = SCREEN_WIDTH - 300
-    basis = tangent_basis(camera_pos)
+    basis = [orientation[1], orientation[2], orientation[3]]
     player_screen_offset = project_to_tangent(camera_pos, player_pos, basis)
 
     projected_points = []
@@ -569,7 +526,7 @@ while running:
     screen.blit(status_text, (10, 10))
 
     controls = [
-        "WASD: Rotate XY/XZ planes | Q/E: Rotate XW plane | Drag: Rotate camera",
+        "WASD: Rotate camera | Q/E: Rotate 4D depth | Drag: Rotate camera",
         "UP/DOWN: Scroll list | Click: Travel to point | V: Toggle view",
     ]
     for i, ctrl in enumerate(controls):

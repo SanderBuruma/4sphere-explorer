@@ -120,6 +120,34 @@ def visible_points(camera_pos, points, fov_angle=np.pi / 2):
     return points[visible], np.where(visible)[0]
 
 
+def rotate_frame(frame, axis_idx, angle):
+    """Rotate orientation frame in plane (row 0, row axis_idx) by angle.
+
+    frame: 4x4 array, row 0 = camera pos, rows 1-3 = tangent basis.
+    Modifies frame in-place.
+    """
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+    cam = frame[0].copy()
+    axis = frame[axis_idx].copy()
+    frame[0] = cos_a * cam + sin_a * axis
+    frame[axis_idx] = -sin_a * cam + cos_a * axis
+
+
+def reorthogonalize_frame(frame):
+    """Re-orthogonalize frame to correct numerical drift.
+
+    Uses modified Gram-Schmidt starting from current vectors to
+    preserve orientation as much as possible.
+    """
+    frame[0] /= np.linalg.norm(frame[0])
+    for i in range(1, 4):
+        v = frame[i].copy()
+        v -= np.dot(v, frame[0]) * frame[0]
+        for j in range(1, i):
+            v -= np.dot(v, frame[j]) * frame[j]
+        frame[i] = v / np.linalg.norm(v)
+
+
 def tangent_basis(cam):
     """Compute 3 orthonormal vectors spanning the tangent space at cam on S³."""
     candidates = np.eye(4)

@@ -133,5 +133,143 @@ class TestTravelQueue(unittest.TestCase):
         self.assertTrue(traveling)
 
 
+class TestRelativeRotation(unittest.TestCase):
+    """Verify QWEADS relative rotations are smooth and consistent everywhere on S³."""
+
+    ROTATION_SPEED = 0.02
+    KEYS = "wasdeq"
+    # axis_idx and sign for each key, matching main.py's rotate_frame calls
+    KEY_MAP = {
+        "w": (2, -1), "s": (2, 1),
+        "a": (1, -1), "d": (1, 1),
+        "q": (3, 1),  "e": (3, -1),
+    }
+
+    def _make_frame(self, cam):
+        """Build initial orientation frame at camera position."""
+        from sphere import tangent_basis
+        frame = np.eye(4)
+        frame[0] = cam / np.linalg.norm(cam)
+        basis = tangent_basis(frame[0])
+        for i in range(3):
+            frame[i + 1] = basis[i]
+        return frame
+
+    def _rotate_step(self, frame, keys):
+        """Apply one frame of rotation for given key(s). Mirrors main.py logic."""
+        from sphere import rotate_frame, reorthogonalize_frame
+        for key in keys:
+            axis_idx, sign = self.KEY_MAP[key]
+            rotate_frame(frame, axis_idx, sign * self.ROTATION_SPEED)
+        reorthogonalize_frame(frame)
+        return frame[0].copy()
+
+    def test_unit_norm_preserved(self):
+        """Camera stays on S³ after 1000 single-key rotation steps."""
+        for key in self.KEYS:
+            frame = self._make_frame(np.array([1.0, 0.0, 0.0, 0.0]))
+            for _ in range(1000):
+                self._rotate_step(frame, key)
+            self.assertAlmostEqual(np.linalg.norm(frame[0]), 1.0, places=10)
+
+    def test_step_size_consistent(self):
+        """Each single-key step moves camera by ~ROTATION_SPEED from various starts."""
+        starts = [
+            np.array([1.0, 0.0, 0.0, 0.0]),
+            np.array([0.0, 1.0, 0.0, 0.0]),
+            np.array([0.5, 0.5, 0.5, 0.5]),
+        ]
+        for start in starts:
+            start /= np.linalg.norm(start)
+            for key in self.KEYS:
+                frame = self._make_frame(start.copy())
+                new_cam = self._rotate_step(frame, key)
+                step = angular_distance(start, new_cam)
+                self.assertAlmostEqual(
+                    step, self.ROTATION_SPEED, places=5,
+                    msg=f"Key '{key}' from {start}: step {step:.6f}",
+                )
+
+    def test_full_rotation_returns_to_start(self):
+        """Rotating ~2pi with a single key returns close to start (great circle)."""
+        steps = int(round(2 * np.pi / self.ROTATION_SPEED))
+        for key in self.KEYS:
+            start = np.array([1.0, 0.0, 0.0, 0.0])
+            frame = self._make_frame(start.copy())
+            for _ in range(steps):
+                self._rotate_step(frame, key)
+            dist = angular_distance(start, frame[0])
+            self.assertLess(
+                dist, 0.01,
+                f"Key '{key}': after {steps} steps, dist from start = {dist:.4f}",
+            )
+
+    def test_no_jumps_through_full_rotation(self):
+        """Every consecutive step has the same angular distance (no discontinuities)."""
+        steps = int(round(2 * np.pi / self.ROTATION_SPEED))
+        for key in self.KEYS:
+            frame = self._make_frame(np.array([0.5, 0.5, 0.5, 0.5]))
+            max_dev = 0.0
+            for _ in range(steps):
+                prev = frame[0].copy()
+                self._rotate_step(frame, key)
+                dev = abs(angular_distance(prev, frame[0]) - self.ROTATION_SPEED)
+                max_dev = max(max_dev, dev)
+            self.assertLess(
+                max_dev, 1e-5,
+                f"Key '{key}': max step deviation = {max_dev:.2e}",
+            )
+
+    def test_combination_two_keys_smooth(self):
+        """Two simultaneous keys produce smooth, consistent step sizes."""
+        combos = ["wa", "wd", "wq", "sa", "se", "dq", "ae"]
+        for combo in combos:
+            frame = self._make_frame(np.array([1.0, 0.0, 0.0, 0.0]))
+            steps = []
+            for _ in range(200):
+                prev = frame[0].copy()
+                self._rotate_step(frame, combo)
+                steps.append(angular_distance(prev, frame[0]))
+                self.assertAlmostEqual(np.linalg.norm(frame[0]), 1.0, places=10)
+            self.assertLess(
+                np.std(steps), 1e-4,
+                f"Combo '{combo}': step std = {np.std(steps):.2e}",
+            )
+
+    def test_combination_three_keys_smooth(self):
+        """Three simultaneous keys still produce smooth rotation."""
+        combos = ["waq", "sde", "wdq", "sae"]
+        for combo in combos:
+            cam = np.array([0.3, 0.4, 0.5, 0.6])
+            cam /= np.linalg.norm(cam)
+            frame = self._make_frame(cam)
+            steps = []
+            for _ in range(200):
+                prev = frame[0].copy()
+                self._rotate_step(frame, combo)
+                steps.append(angular_distance(prev, frame[0]))
+                self.assertAlmostEqual(np.linalg.norm(frame[0]), 1.0, places=10)
+            self.assertLess(
+                np.std(steps), 1e-4,
+                f"Combo '{combo}': step std = {np.std(steps):.2e}",
+            )
+
+    def test_from_random_starting_positions(self):
+        """Single-key rotation is consistent from 20 random positions on S³."""
+        rng = np.random.default_rng(123)
+        for _ in range(20):
+            cam = rng.standard_normal(4)
+            cam /= np.linalg.norm(cam)
+            for key in self.KEYS:
+                frame = self._make_frame(cam.copy())
+                new_cam = self._rotate_step(frame, key)
+                step = angular_distance(cam, new_cam)
+                self.assertAlmostEqual(
+                    step, self.ROTATION_SPEED, places=4,
+                    msg=f"Key '{key}' from {cam}: step {step:.6f}",
+                )
+                self.assertAlmostEqual(np.linalg.norm(new_cam), 1.0, places=10)
+
+
 if __name__ == "__main__":
     unittest.main()
