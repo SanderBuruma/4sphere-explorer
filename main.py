@@ -47,7 +47,7 @@ point_colors = random_color(NUM_POINTS)  # Assign random colors
 traveling = False
 travel_target = None
 travel_progress = 0.0
-travel_speed = 0.002  # per frame
+travel_speed = 0.0002  # per frame
 
 # UI state
 list_scroll = 0
