@@ -271,5 +271,69 @@ class TestRelativeRotation(unittest.TestCase):
                 self.assertAlmostEqual(np.linalg.norm(new_cam), 1.0, places=10)
 
 
+class TestAudioVolumeLevels(unittest.TestCase):
+    """No single point's music should be significantly louder than the average."""
+
+    def test_rms_within_1_std(self):
+        """RMS of every sound in a 100-point sample must be within 1 std of the mean."""
+        from audio import generate_signal
+        rng = np.random.default_rng(0)
+        keys = rng.integers(0, 11_817_000, size=100)
+        rms_values = np.array([
+            np.sqrt(np.mean(generate_signal(int(k)) ** 2)) for k in keys
+        ])
+        mean_rms = rms_values.mean()
+        std_rms = rms_values.std()
+        for i, rms in enumerate(rms_values):
+            self.assertLess(
+                rms, mean_rms + std_rms,
+                f"Key {keys[i]}: RMS {rms:.4f} exceeds mean {mean_rms:.4f} + 1 std {std_rms:.4f}",
+            )
+
+
+class TestAudioQuality(unittest.TestCase):
+    """Generated sounds must be smooth, low-pitched, and free of artifacts."""
+
+    def test_sound_quality_1000_random(self):
+        """50 random sounds: low spectral centroid, no clicks, no high-freq shrillness."""
+        from audio import generate_signal, SAMPLE_RATE
+        rng = np.random.default_rng()  # non-deterministic
+        keys = rng.integers(0, 11_817_000, size=50)
+
+        for key in keys:
+            key = int(key)
+            signal = generate_signal(key)
+            n = len(signal)
+
+            # Sanity: no NaN/Inf, bounded to [-1, 1]
+            self.assertFalse(np.any(np.isnan(signal)), f"Key {key}: NaN in signal")
+            self.assertFalse(np.any(np.isinf(signal)), f"Key {key}: Inf in signal")
+            self.assertGreaterEqual(signal.min(), -1.0, f"Key {key}: signal below -1.0")
+            self.assertLessEqual(signal.max(), 1.0, f"Key {key}: signal above 1.0")
+
+            # Spectral centroid < 400 Hz — not shrill
+            fft_mag = np.abs(np.fft.rfft(signal))
+            freqs = np.fft.rfftfreq(n, 1.0 / SAMPLE_RATE)
+            power = fft_mag ** 2
+            total_power = np.sum(power)
+            centroid = np.sum(freqs * power) / total_power
+            self.assertLess(centroid, 400,
+                f"Key {key}: spectral centroid {centroid:.0f} Hz (shrill)")
+
+            # < 15% energy above 600 Hz — keeps sound warm
+            high_ratio = np.sum(power[freqs > 600]) / total_power
+            self.assertLess(high_ratio, 0.15,
+                f"Key {key}: {high_ratio:.1%} energy above 600 Hz")
+
+            # No clicks: max sample-to-sample jump < 0.5
+            max_diff = np.max(np.abs(np.diff(signal)))
+            self.assertLess(max_diff, 0.5,
+                f"Key {key}: max sample diff {max_diff:.4f} (click/pop)")
+
+            # No DC offset (mean near zero)
+            dc = abs(np.mean(signal))
+            self.assertLess(dc, 0.05, f"Key {key}: DC offset {dc:.4f}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@ import pygame
 import numpy as np
 from io import BytesIO
 from pydenticon import Generator
+from audio import init_audio, update_audio, cleanup_audio
 from sphere import (
     random_point_on_s3,
     angular_distance,
@@ -17,7 +18,9 @@ from sphere import (
     TOTAL_NAMES,
 )
 
+pygame.mixer.pre_init(44100, -16, 2)
 pygame.init()
+init_audio()
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 800
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -189,6 +192,7 @@ while running:
     reorthogonalize_frame(orientation)
     camera_pos = orientation[0]
     update_visible()
+    update_audio(visible_indices, visible_distances, _name_keys)
 
     # List scrolling
     item_height = 40
@@ -535,4 +539,5 @@ while running:
 
     pygame.display.flip()
 
+cleanup_audio()
 pygame.quit()
