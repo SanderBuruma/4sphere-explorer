@@ -311,18 +311,18 @@ class TestAudioQuality(unittest.TestCase):
             self.assertGreaterEqual(signal.min(), -1.0, f"Key {key}: signal below -1.0")
             self.assertLessEqual(signal.max(), 1.0, f"Key {key}: signal above 1.0")
 
-            # Spectral centroid < 400 Hz — not shrill
+            # Spectral centroid < 500 Hz — not shrill
             fft_mag = np.abs(np.fft.rfft(signal))
             freqs = np.fft.rfftfreq(n, 1.0 / SAMPLE_RATE)
             power = fft_mag ** 2
             total_power = np.sum(power)
             centroid = np.sum(freqs * power) / total_power
-            self.assertLess(centroid, 400,
+            self.assertLess(centroid, 500,
                 f"Key {key}: spectral centroid {centroid:.0f} Hz (shrill)")
 
-            # < 15% energy above 600 Hz — keeps sound warm
+            # < 20% energy above 600 Hz — keeps sound warm
             high_ratio = np.sum(power[freqs > 600]) / total_power
-            self.assertLess(high_ratio, 0.15,
+            self.assertLess(high_ratio, 0.20,
                 f"Key {key}: {high_ratio:.1%} energy above 600 Hz")
 
             # No clicks: max sample-to-sample jump < 0.5

@@ -85,7 +85,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - **UI:** Crosshair at camera position, scrollable distance-sorted list with color swatches, hover tooltips
 - **Distance color gradient:** Green (0% of LoS) → Yellow (60% of LoS) → Red (100% of LoS)
 - **Distance display:** mrad for distances < 1 rad, rad for >= 1 rad
-- **Procedural ambient music:** Each point has a unique techno soundscape (seeded by name key), audible within 10 mrad (`AUDIO_RANGE`). Volume fades linearly with distance. Four timbres: supersaw pad, acid bass, synth pluck, FM bass — all low-frequency (root 58–185 Hz, harmonics capped ~500 Hz). RMS-normalized for consistent perceived loudness. 15-second seamless loops with crossfade
+- **Procedural ambient music:** Each point has a unique techno soundscape (seeded by name key), audible within 10 mrad (`AUDIO_RANGE`). Volume fades linearly with distance. Ten timbres: supersaw pad, acid bass, synth pluck, FM bass, noise drone, ring mod, PWM, organ, wavefold, stutter — root 33–466 Hz (MIDI 25–70), harmonics capped at 700 Hz with rolloff above 580 Hz. Twelve scales (pentatonic, dorian, phrygian, whole tone, blues, harmonic minor, lydian, mixolydian, locrian, japanese in-sen). Five tempo levels (0.08–5.0s). Tone frequencies octave-folded above 580 Hz. 2.14M+ discrete configurations. RMS-normalized for consistent perceived loudness. 15-second seamless loops with crossfade
 
 ### Controls
 | Input | Action |
@@ -108,7 +108,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - **Name key sampling:** `np.random.choice(TOTAL_NAMES, 30000, replace=False)` at startup with fixed seed (42) ensures deterministic, collision-free 30k unique names from 11.8M name space
 - **Lazy caching:** Both identicons and names cached separately with LRU eviction in `update_visible()` to keep memory bounded
 - **Travel completion:** Snaps to target at < 0.02 rad proximity, fires pop animation. If a queued target exists, immediately begins traveling to it
-- **Audio synthesis:** `generate_signal()` returns raw float64 array (testable without pygame). `generate_sound()` wraps it into a `pygame.mixer.Sound`. Four timbre functions (`_synth_supersaw`, `_synth_acid`, `_synth_pluck`, `_synth_fm`) each take frequency, time array, and RNG. DC offset removed before RMS normalization to target 0.25. `update_audio()` manages channel allocation per frame based on proximity
+- **Audio synthesis:** `generate_signal()` returns raw float64 array (testable without pygame). `generate_sound()` wraps it into a `pygame.mixer.Sound`. Ten timbre functions each take `(freq, t, rng, tempo_range)`. `_rolloff(h)` attenuates harmonics linearly between 580–700 Hz to keep energy warm. Acid resonance uses proper phase accumulation (`np.cumsum`) instead of `freq*t`. Ring mod filters ratios to keep both sum and difference frequencies below 580 Hz, with full sideband suppression above. DC offset removed before RMS normalization to target 0.25. `update_audio()` manages channel allocation per frame based on proximity
 - Keep 4D rotation math clean and testable
 - Minimize over-engineering: navigation + rendering first, fancy visuals second
 
