@@ -958,12 +958,12 @@ while running:
                 # Use same color as 3D view (hue from point, brightness from distance)
                 point_color = point_display_colors.get(inspected_point_idx, point_colors[inspected_point_idx])
 
-                # Colorize sprite
+                # Colorize sprite using BLEND_MULT (same method as 3D viewport)
                 colorized = scaled_sprite.copy()
-                color_array = pygame.surfarray.array3d(colorized)
-                color_array[:,:,0] = (color_array[:,:,0] * point_color[0] // 255).clip(0, 255)
-                color_array[:,:,1] = (color_array[:,:,1] * point_color[1] // 255).clip(0, 255)
-                color_array[:,:,2] = (color_array[:,:,2] * point_color[2] // 255).clip(0, 255)
+                color_surf = pygame.Surface((sprite_size, sprite_size))
+                color_surf.fill(point_color)
+                color_surf.set_colorkey((0, 0, 0))
+                colorized.blit(color_surf, (0, 0), special_flags=pygame.BLEND_MULT)
 
                 # Apply random rotation and mirroring based on point hash
                 sprite_seed = (inspected_point_idx * 73) % 360  # Deterministic rotation per point
