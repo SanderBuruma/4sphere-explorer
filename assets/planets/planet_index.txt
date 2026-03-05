@@ -1,0 +1,14 @@
+planet_index.txt — Planet sprite metadata for colorizable sprite rendering.
+
+Format: filename | name | description | dominant_color
+
+planet_01.png | Earth | Blue and green terrestrial world | (30, 100, 200)
+planet_02.png | Mars | Red rusty rocky planet with dark maria | (180, 80, 50)
+planet_03.png | Jupiter | Purple gas giant with storm bands | (150, 100, 200)
+planet_04.png | Frost World | White and cyan ice-covered world | (220, 240, 255)
+planet_05.png | Inferno | Orange and yellow lava-covered world | (255, 150, 50)
+planet_06.png | Desert | Tan and ochre sandy desert world | (210, 170, 100)
+planet_07.png | Jungle | Dense green vegetation covered world | (50, 120, 50)
+planet_08.png | Methane | Blue-green methane atmosphere | (100, 180, 200)
+planet_09.png | Saturn | Yellow gold planet with elegant rings | (220, 180, 80)
+planet_10.png | Void | Black dead world with minimal features | (30, 30, 40)

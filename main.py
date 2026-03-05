@@ -133,6 +133,87 @@ def get_identicon(idx):
         point_identicon_cache[idx] = identicon_with_margin
     return point_identicon_cache[idx]
 
+# Planet sprite loader
+planet_sprites = {}  # filename -> pygame.Surface
+
+def load_planet_sprites():
+    """Load all 10 planet sprites from assets/planets/ directory."""
+    import os
+    planet_dir = "assets/planets"
+    if not os.path.isdir(planet_dir):
+        print(f"WARNING: Planet directory not found at {planet_dir}")
+        return False
+
+    planet_files = [f"planet_{i:02d}.png" for i in range(1, 11)]
+    loaded_count = 0
+
+    for filename in planet_files:
+        filepath = os.path.join(planet_dir, filename)
+        try:
+            if os.path.exists(filepath):
+                img = pygame.image.load(filepath)
+                planet_sprites[filename] = img
+                loaded_count += 1
+            else:
+                print(f"WARNING: {filename} not found at {filepath}")
+        except Exception as e:
+            print(f"ERROR loading {filename}: {e}")
+
+    success = loaded_count == len(planet_files)
+    print(f"Loaded {loaded_count}/{len(planet_files)} planet sprites")
+    return success
+
+def get_planet_sprite(point_idx):
+    """Get a planet sprite for a point, deterministically based on its index.
+
+    Args:
+        point_idx: Point index (0 to NUM_POINTS-1)
+
+    Returns:
+        pygame.Surface or None if sprites not loaded
+    """
+    if not planet_sprites:
+        return None
+    # Hash-based selection: deterministic mapping of point to sprite
+    sprite_idx = (point_idx * 73) % 10  # Use prime multiplier for distribution
+    filename = f"planet_{sprite_idx + 1:02d}.png"
+    return planet_sprites.get(filename)
+
+def render_point_sprite(screen, sprite, p2d, radius, color):
+    """Render a colorized planet sprite at screen position.
+
+    Args:
+        screen: pygame.Surface to draw to
+        sprite: pygame.Surface sprite to render
+        p2d: (x, y) screen position
+        radius: Approximate sprite size (will scale sprite to ~2*radius)
+        color: (r, g, b) color to multiply sprite by
+    """
+    if sprite is None:
+        return False
+
+    # Scale sprite to match desired radius (sprite is 64x64)
+    scale_size = max(4, int(2 * radius))
+    try:
+        scaled_sprite = pygame.transform.scale(sprite, (scale_size, scale_size))
+
+        # Colorize by multiplying the sprite colors
+        # Create a new surface with the color tint applied
+        tinted = scaled_sprite.copy()
+        # Use a color surface to multiply
+        color_surf = pygame.Surface((scale_size, scale_size))
+        color_surf.fill(color)
+        color_surf.set_colorkey((0, 0, 0))
+        tinted.blit(color_surf, (0, 0), special_flags=pygame.BLEND_MULT)
+
+        # Draw at position
+        draw_pos = (int(p2d[0]) - scale_size // 2, int(p2d[1]) - scale_size // 2)
+        screen.blit(tinted, draw_pos)
+        return True
+    except Exception as e:
+        print(f"ERROR rendering sprite: {e}")
+        return False
+
 traveling = False
 travel_target = None
 travel_target_idx = None
@@ -277,6 +358,7 @@ def update_visible():
 
 
 update_visible()
+load_planet_sprites()
 
 running = True
 while running:
@@ -583,7 +665,13 @@ while running:
             pygame.draw.circle(glow_surf, (*color, glow_alpha), (glow_radius + 2, glow_radius + 2), glow_radius)
             screen.blit(glow_surf, (int(p2d[0]) - glow_radius - 2, int(p2d[1]) - glow_radius - 2))
 
-            pygame.draw.circle(screen, color, p2d.astype(int), radius)
+            # Try to render sprite; fall back to circle if sprite not available
+            sprite = get_planet_sprite(idx)
+            if sprite and render_point_sprite(screen, sprite, p2d, radius, color):
+                pass  # Sprite rendered successfully
+            else:
+                # Fallback to circle if sprite missing
+                pygame.draw.circle(screen, color, p2d.astype(int), radius)
 
             # Inspection ring on currently inspected point
             if idx == inspected_point_idx:
@@ -837,12 +925,13 @@ while running:
                 f"Root: {audio_info['root_hz']} Hz | Tempo: {audio_info['tempo']}",
             ]
 
-            # Measure panel size
+            # Measure panel size (including sprite area at top)
             line_height = 16
             padding = 8
+            sprite_size = 128
             max_w = max(font.size(line)[0] for line in lines)
-            panel_w = max_w + padding * 2
-            panel_h = len(lines) * line_height + padding * 2
+            panel_w = max(max_w + padding * 2, sprite_size + padding * 2)
+            panel_h = sprite_size + padding * 3 + len(lines) * line_height
 
             # Position: offset right and above the anchor point
             px = panel_anchor[0] + 20
@@ -857,10 +946,32 @@ while running:
             pygame.draw.rect(panel_surf, (20, 20, 40, 200), (0, 0, panel_w, panel_h), border_radius=4)
             pygame.draw.rect(panel_surf, (255, 200, 50, 120), (0, 0, panel_w, panel_h), 1, border_radius=4)
 
+            # Draw large sprite at top of panel
+            sprite_idx = get_planet_sprite(inspected_point_idx)
+            if sprite_idx is not None and sprite_idx in PLANET_SPRITES:
+                sprite = PLANET_SPRITES[sprite_idx]
+                scaled_sprite = pygame.transform.scale(sprite, (sprite_size, sprite_size))
+                # Get point color for colorization
+                _, _, base_color = colors[inspected_point_idx]
+                r = int(np.clip((base_color[0] + 1.0) * 127.5, 0, 255))
+                g = int(np.clip((base_color[1] + 1.0) * 127.5, 0, 255))
+                b = int(np.clip((base_color[2] + 1.0) * 127.5, 0, 255))
+                point_color = (r, g, b)
+                # Colorize sprite
+                colorized = scaled_sprite.copy()
+                color_array = pygame.surfarray.array3d(colorized)
+                color_array[:,:,0] = (color_array[:,:,0] * point_color[0] // 255).clip(0, 255)
+                color_array[:,:,1] = (color_array[:,:,1] * point_color[1] // 255).clip(0, 255)
+                color_array[:,:,2] = (color_array[:,:,2] * point_color[2] // 255).clip(0, 255)
+                sprite_x = (panel_w - sprite_size) // 2
+                panel_surf.blit(colorized, (sprite_x, padding))
+
+            # Draw text below sprite
+            text_y = sprite_size + padding * 2
             for li, line in enumerate(lines):
                 color = (255, 200, 50) if li == 0 else TEXT_COLOR
                 lbl = font.render(line, True, color)
-                panel_surf.blit(lbl, (padding, padding + li * line_height))
+                panel_surf.blit(lbl, (padding, text_y + li * line_height))
 
             screen.blit(panel_surf, (px, py))
         else:
