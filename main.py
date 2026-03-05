@@ -861,7 +861,9 @@ while running:
         padding = 4
         bg_rect = pygame.Rect(tx - padding, ty - padding, tooltip_width + padding * 2, tooltip_height + padding * 2)
         pygame.draw.rect(screen, (30, 30, 50), bg_rect)
-        pygame.draw.rect(screen, point_colors[h_idx], bg_rect, 1)
+        # Use distance-based color gradient to match detail panel
+        tooltip_border_color = distance_to_color(h_dist)
+        pygame.draw.rect(screen, tooltip_border_color, bg_rect, 1)
 
         # Draw identicon and label
         screen.blit(identicon, (tx, ty + (tooltip_height - 32) // 2))
