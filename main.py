@@ -54,7 +54,7 @@ LIST_ITEM_HOVER = (80, 80, 120)
 NUM_POINTS = 30_000
 FOV_ANGLE = 0.116  # radians, tuned for ~10 visible points
 GAME_SEED = 42
-ARRIVAL_THRESHOLD = 0.002  # radians — snap to target when this close
+ARRIVAL_THRESHOLD = 0.0005  # radians (0.5 mrad) — snap to target when this close
 CAMERA_OFFSET = 0.08  # radians — camera orbital distance from player
 ROTATION_SPEED = 0.02  # radians per frame for WASD/QE
 TRAVEL_SPEED = 0.000008  # slerp progress per frame
@@ -467,7 +467,7 @@ while running:
                     dist = (dx * dx + dy * dy) ** 0.5
                     if WEDGE_INNER < dist < MENU_RADIUS:
                         angle = math.atan2(-dy, dx)  # negative dy for screen coords
-                        wedge = int((angle + math.pi) / (math.pi / 2) + 2) % 4
+                        wedge = int((angle + math.pi + math.pi / 4) / (math.pi / 2) + 2) % 4
                         if wedge == 0:  # Info wedge (right)
                             inspected_point_idx = menu_point_idx
                         # wedges 1,2,3 are placeholders — no action
@@ -816,16 +816,8 @@ while running:
                     pygame.draw.polygon(screen, (100, 150, 255), tri_verts)
                 break
 
-    # Draw camera position crosshair at center of view area
-    crosshair_radius = 12
-    crosshair_size = 8
-
-    # Hollow circle
-    pygame.draw.circle(screen, CAMERA_COLOR, (center_x, center_y), crosshair_radius, 2)
-
-    # Crosshair lines (+ shape)
-    pygame.draw.line(screen, CAMERA_COLOR, (center_x - crosshair_size, center_y), (center_x + crosshair_size, center_y), 2)
-    pygame.draw.line(screen, CAMERA_COLOR, (center_x, center_y - crosshair_size), (center_x, center_y + crosshair_size), 2)
+    # Draw player position dot at center of view area
+    pygame.draw.circle(screen, CAMERA_COLOR, (center_x, center_y), 3)
 
     # Draw auto-travel feedback message
     if auto_travel_feedback is not None:
@@ -877,7 +869,7 @@ while running:
         dy_menu = my_now - menu_center[1]
         hover_dist = (dx_menu * dx_menu + dy_menu * dy_menu) ** 0.5
         hover_angle = math.atan2(-dy_menu, dx_menu)
-        hover_wedge = int((hover_angle + math.pi) / (math.pi / 2) + 2) % 4 if WEDGE_INNER < hover_dist < MENU_RADIUS else -1
+        hover_wedge = int((hover_angle + math.pi + math.pi / 4) / (math.pi / 2) + 2) % 4 if hover_dist > WEDGE_INNER else -1
 
         menu_surf = pygame.Surface((MENU_RADIUS * 2 + 4, MENU_RADIUS * 2 + 4), pygame.SRCALPHA)
         mc = MENU_RADIUS + 2  # center of surface
@@ -890,13 +882,24 @@ while running:
         wedge_colors = [(100, 200, 255), (100, 100, 120), (100, 100, 120), (100, 100, 120)]
         wedge_angles = [0, math.pi / 2, math.pi, 3 * math.pi / 2]  # right, down-ish, left, up-ish (screen coords inverted)
         for wi, (label, color, wa) in enumerate(zip(wedge_labels, wedge_colors, wedge_angles)):
-            # Wedge center position
+            # Highlight hovered wedge with filled pie sector
+            if wi == hover_wedge:
+                # Build polygon: inner arc -> outer arc -> close
+                a_start = wa - math.pi / 4
+                a_end = wa + math.pi / 4
+                n_seg = 12
+                pts = []
+                for si in range(n_seg + 1):
+                    a = a_start + (a_end - a_start) * si / n_seg
+                    pts.append((mc + WEDGE_INNER * math.cos(a), mc - WEDGE_INNER * math.sin(a)))
+                for si in range(n_seg, -1, -1):
+                    a = a_start + (a_end - a_start) * si / n_seg
+                    pts.append((mc + MENU_RADIUS * math.cos(a), mc - MENU_RADIUS * math.sin(a)))
+                pygame.draw.polygon(menu_surf, (*color, 60), pts)
+            # Wedge center position for label
             wr = (WEDGE_INNER + MENU_RADIUS) / 2
             wx = mc + int(wr * math.cos(wa))
             wy = mc - int(wr * math.sin(wa))  # invert y for screen
-            # Highlight hovered wedge
-            if wi == hover_wedge:
-                pygame.draw.circle(menu_surf, (*color, 60), (wx, wy), 18)
             lbl = font.render(label, True, color if wi == 0 else (80, 80, 100))
             menu_surf.blit(lbl, (wx - lbl.get_width() // 2, wy - lbl.get_height() // 2))
 
