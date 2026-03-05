@@ -314,39 +314,49 @@ def generate_signal(name_key: int) -> np.ndarray:
             f *= 2
         note_pool.append(f)
 
-    # Melody: repeating pattern of 12-24 steps with stepwise motion
+    # Melody: repeating pattern of 12-24 notes with varied durations
+    # Durations are beat subdivisions/multiples (powers of 2)
+    _DURATIONS = [0.25, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 4.0]
+    bar_len = int(rng.choice([3, 4, 4, 4]))  # beats per bar (mostly 4/4)
     pat_len = int(rng.integers(12, 25))
-    pattern = []
+    pattern = []  # list of (freq, duration_multiplier)
     note_idx = int(rng.integers(len(note_pool)))
+    beat_pos = 0.0  # current position within bar in beats
     for _ in range(pat_len):
+        dur_mult = float(rng.choice(_DURATIONS))
+        # Cap duration so it doesn't cross a bar boundary
+        beats_left = bar_len - beat_pos
+        if dur_mult > beats_left:
+            dur_mult = beats_left if beats_left >= 0.25 else dur_mult
+        beat_pos = (beat_pos + dur_mult) % bar_len
         if rng.random() < 0.12:
-            pattern.append(0.0)  # rest
+            pattern.append((0.0, dur_mult))  # rest
         else:
             move = int(rng.integers(-2, 3))
             note_idx = (note_idx + move) % len(note_pool)
-            pattern.append(note_pool[note_idx])
+            pattern.append((note_pool[note_idx], dur_mult))
 
     # Build per-sample frequency track and note envelope
     total_samples = int((BUFFER_SECONDS + CROSSFADE) * SAMPLE_RATE)
-    step_samples = max(1, int(step_dur * SAMPLE_RATE))
-    n_steps = total_samples // step_samples + 2
 
     freq_track = np.zeros(total_samples)
     envelope = np.zeros(total_samples)
 
     att_samples = max(1, int(attack_s * SAMPLE_RATE))
-    rel_samples = max(1, int(step_dur * release_frac * SAMPLE_RATE))
-
-    for i in range(n_steps):
-        freq = pattern[i % pat_len]
-        s = i * step_samples
-        e = min(s + step_samples, total_samples)
-        if s >= total_samples:
-            break
+    pos = 0
+    pat_idx = 0
+    while pos < total_samples:
+        freq, dur_mult = pattern[pat_idx % pat_len]
+        note_samples = max(1, int(step_dur * dur_mult * SAMPLE_RATE))
+        s = pos
+        e = min(s + note_samples, total_samples)
+        n = e - s
+        pos = e
+        pat_idx += 1
         if freq == 0.0:
             continue
-        n = e - s
         freq_track[s:e] = freq
+        rel_samples = max(1, int(step_dur * dur_mult * release_frac * SAMPLE_RATE))
         env = np.ones(n)
         a = min(att_samples, n // 4)
         r = min(rel_samples, n // 2)
@@ -360,7 +370,7 @@ def generate_signal(name_key: int) -> np.ndarray:
     phase = 2 * np.pi * np.cumsum(freq_track) / SAMPLE_RATE
 
     # Render harmonics — filter by max note freq to keep energy below 600 Hz
-    max_note_freq = max((f for f in pattern if f > 0), default=root_hz)
+    max_note_freq = max((f for f, _ in pattern if f > 0), default=root_hz)
     signal = np.zeros(total_samples, dtype=np.float64)
     for h_num, h_amp in harmonics:
         if max_note_freq * h_num > 580:
