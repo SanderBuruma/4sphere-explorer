@@ -10,18 +10,21 @@ MASTER_VOLUME = 0.7
 HARMONIC_CAP = 700  # Hz, max frequency for explicit harmonic synthesis
 
 SCALES = [
-    [0, 3, 5, 7, 10],         # pentatonic minor
-    [0, 2, 4, 7, 9],          # pentatonic major
-    [0, 2, 5, 7, 10],         # suspended
-    [0, 2, 3, 5, 7, 9, 10],   # dorian
-    [0, 1, 3, 5, 7, 8, 10],   # phrygian
-    [0, 2, 4, 6, 8, 10],      # whole tone
-    [0, 3, 5, 6, 7, 10],      # blues
-    [0, 2, 3, 5, 7, 8, 11],   # harmonic minor
-    [0, 2, 4, 6, 7, 9, 11],   # lydian
-    [0, 2, 4, 5, 7, 9, 10],   # mixolydian
-    [0, 1, 3, 5, 6, 8, 10],   # locrian
-    [0, 2, 3, 7, 9],          # japanese in-sen
+    [0, 4, 7],                 # major triad
+    [0, 4, 7, 11],             # major 7th
+    [0, 4, 7, 11, 14],         # major 9th
+    [0, 2, 4, 7, 9],           # major pentatonic
+    [0, 2, 4, 5, 7, 9, 11],    # ionian (major scale)
+    [0, 2, 4, 6, 7, 9, 11],    # lydian
+    [0, 2, 4, 5, 7, 9, 10],    # mixolydian
+    [0, 4, 7, 10],             # dominant 7th
+    [0, 4, 7, 9],              # major 6th
+    [0, 2, 4, 7, 9, 11],       # major hexatonic
+    [0, 4, 7, 14, 16],         # major triad + high 9th/10th
+    [0, 2, 4, 7, 11],          # major add9
+    [0, 3, 7],                 # minor triad
+    [0, 3, 7, 10],             # minor 7th
+    [0, 2, 3, 5, 7, 8, 11],    # harmonic minor
 ]
 
 TEMPO_RANGES = [
@@ -234,44 +237,137 @@ _TIMBRE_NAMES = (
 )
 
 _SCALE_NAMES = (
-    "Pentatonic minor", "Pentatonic major", "Suspended", "Dorian",
-    "Phrygian", "Whole tone", "Blues", "Harmonic minor",
-    "Lydian", "Mixolydian", "Locrian", "Japanese in-sen",
+    "Major triad", "Major 7th", "Major 9th", "Major pentatonic",
+    "Ionian", "Lydian", "Mixolydian", "Dominant 7th",
+    "Major 6th", "Major hexatonic", "Major wide", "Major add9",
+    "Minor triad", "Minor 7th", "Harmonic minor",
 )
 
 _TEMPO_LABELS = ("Ambient", "Slow", "Medium", "Fast", "Glitchy")
 
-# Discrete search space: 46 MIDI x 10 timbres x 12 scales x 5 tempos
+# Discrete search space (conservative lower bound):
+# 46 MIDI x 10 timbres x 15 scales x 5 tempos x 13 pattern lengths
+# x 6 avg starting notes x 5.6^12 min melody combos ≈ 50B+
 # x ~80 avg tone combos = 2,208,000+ unique configurations
 
 
+def _timbre_harmonics(timbre_idx, rng):
+    """Return (harmonics_list, attack_seconds, release_fraction) for timbre.
+
+    harmonics_list: [(harmonic_ratio, relative_amplitude), ...]
+    attack_seconds: note attack time
+    release_fraction: fraction of step duration used for release
+    """
+    if timbre_idx == 0:  # supersaw — rich sawtooth
+        return [(n, 1.0 / n) for n in range(1, 10)], 0.02, 0.4
+    if timbre_idx == 1:  # acid — square (odd harmonics)
+        return [(n, 1.0 / n) for n in range(1, 12, 2)], 0.005, 0.2
+    if timbre_idx == 2:  # pluck — fast decay, fewer harmonics
+        return [(n, 1.0 / n ** 1.5) for n in range(1, 8)], 0.002, 0.7
+    if timbre_idx == 3:  # FM — fundamental + sidebands
+        r = int(rng.choice([2, 3, 4]))
+        return [(1, 1.0), (r, 0.4), (r + 1, 0.15)], 0.008, 0.35
+    if timbre_idx == 4:  # noise drone — fundamental + close detuned
+        d = float(rng.uniform(1.005, 1.02))
+        return [(1, 0.7), (d, 0.5), (2, 0.3), (3, 0.15)], 0.03, 0.5
+    if timbre_idx == 5:  # ring mod — sum/difference tones
+        r = float(rng.choice([1.5, 2.0, 2.5]))
+        return [(1, 0.6), (r, 0.4), (r - 1, 0.2)], 0.008, 0.3
+    if timbre_idx == 6:  # PWM — all harmonics, weighted
+        return [(n, 0.8 / n) for n in range(1, 10)], 0.01, 0.35
+    if timbre_idx == 7:  # organ — drawbar-like
+        return [(1, 1.0), (2, 0.7), (3, 0.5), (4, 0.3), (6, 0.2), (8, 0.1)], 0.01, 0.25
+    if timbre_idx == 8:  # wavefold — odd harmonics from saturation
+        return [(1, 1.0), (3, 0.4), (5, 0.15), (7, 0.05)], 0.01, 0.4
+    if timbre_idx == 9:  # stutter — sharp, rhythmic
+        return [(n, 1.0 / n ** 0.7) for n in range(1, 7)], 0.002, 0.1
+    return [(1, 1.0)], 0.01, 0.3
+
+
 def generate_signal(name_key: int) -> np.ndarray:
-    """Generate normalized float64 audio signal. Returns 1D array in [-1, 1]."""
+    """Generate normalized float64 audio signal with melodic sequencing."""
     rng = np.random.default_rng(name_key)
 
     # Root frequency: MIDI 25–70 mapped to Hz (~33–370 Hz)
     midi = rng.integers(25, 71)
     root_hz = 440.0 * 2 ** ((midi - 69) / 12.0)
 
-    # Pick timbre, scale, tempo, and tones
-    timbre = _TIMBRES[rng.integers(len(_TIMBRES))]
-    scale = SCALES[rng.integers(len(SCALES))]
-    tempo_range = TEMPO_RANGES[rng.integers(len(TEMPO_RANGES))]
+    # Pick timbre, scale, tempo (same RNG sequence as get_audio_params)
+    timbre_idx = int(rng.integers(len(_TIMBRES)))
+    scale = SCALES[int(rng.integers(len(SCALES)))]
+    tempo_idx = int(rng.integers(len(TEMPO_RANGES)))
+    tempo_range = TEMPO_RANGES[tempo_idx]
 
-    max_tones = min(6, len(scale))
-    n_tones = rng.integers(2, max_tones + 1)
-    tone_indices = rng.choice(len(scale), size=n_tones, replace=False)
-    freqs = [root_hz * 2 ** (scale[i] / 12.0) for i in sorted(tone_indices)]
-    # Octave-fold any tone above 580 Hz to keep fundamentals warm
-    freqs = [f / 2 if f > 580 else f for f in freqs]
+    # Timbre characteristics
+    harmonics, attack_s, release_frac = _timbre_harmonics(timbre_idx, rng)
 
-    # Generate buffer with extra tail for crossfade
+    # Step duration clamped to musical range (120-500 BPM in note terms)
+    step_dur = float(np.clip(rng.uniform(*tempo_range), 0.12, 0.5))
+
+    # Available note frequencies from scale (octave-folded to stay warm)
+    note_pool = []
+    for deg in scale:
+        f = root_hz * 2 ** (deg / 12.0)
+        while f > 500:
+            f /= 2
+        while f < 30:
+            f *= 2
+        note_pool.append(f)
+
+    # Melody: repeating pattern of 12-24 steps with stepwise motion
+    pat_len = int(rng.integers(12, 25))
+    pattern = []
+    note_idx = int(rng.integers(len(note_pool)))
+    for _ in range(pat_len):
+        if rng.random() < 0.12:
+            pattern.append(0.0)  # rest
+        else:
+            move = int(rng.integers(-2, 3))
+            note_idx = (note_idx + move) % len(note_pool)
+            pattern.append(note_pool[note_idx])
+
+    # Build per-sample frequency track and note envelope
     total_samples = int((BUFFER_SECONDS + CROSSFADE) * SAMPLE_RATE)
-    t = np.arange(total_samples) / SAMPLE_RATE
-    signal = np.zeros(total_samples, dtype=np.float64)
+    step_samples = max(1, int(step_dur * SAMPLE_RATE))
+    n_steps = total_samples // step_samples + 2
 
-    for freq in freqs:
-        signal += timbre(freq, t, rng, tempo_range)
+    freq_track = np.zeros(total_samples)
+    envelope = np.zeros(total_samples)
+
+    att_samples = max(1, int(attack_s * SAMPLE_RATE))
+    rel_samples = max(1, int(step_dur * release_frac * SAMPLE_RATE))
+
+    for i in range(n_steps):
+        freq = pattern[i % pat_len]
+        s = i * step_samples
+        e = min(s + step_samples, total_samples)
+        if s >= total_samples:
+            break
+        if freq == 0.0:
+            continue
+        n = e - s
+        freq_track[s:e] = freq
+        env = np.ones(n)
+        a = min(att_samples, n // 4)
+        r = min(rel_samples, n // 2)
+        if a > 1:
+            env[:a] = np.linspace(0, 1, a)
+        if r > 1:
+            env[-r:] = np.linspace(1, 0, r)
+        envelope[s:e] = env
+
+    # Phase accumulation for pitch-accurate melody
+    phase = 2 * np.pi * np.cumsum(freq_track) / SAMPLE_RATE
+
+    # Render harmonics — filter by max note freq to keep energy below 600 Hz
+    max_note_freq = max((f for f in pattern if f > 0), default=root_hz)
+    signal = np.zeros(total_samples, dtype=np.float64)
+    for h_num, h_amp in harmonics:
+        if max_note_freq * h_num > 580:
+            continue
+        signal += _rolloff(root_hz * h_num) * h_amp * np.sin(phase * h_num)
+
+    signal *= envelope
 
     # Crossfade tail into head for seamless loop
     cf = int(CROSSFADE * SAMPLE_RATE)
