@@ -950,12 +950,8 @@ while running:
             sprite = get_planet_sprite(inspected_point_idx)
             if sprite is not None:
                 scaled_sprite = pygame.transform.scale(sprite, (sprite_size, sprite_size))
-                # Get point color for colorization
-                _, _, base_color = colors[inspected_point_idx]
-                r = int(np.clip((base_color[0] + 1.0) * 127.5, 0, 255))
-                g = int(np.clip((base_color[1] + 1.0) * 127.5, 0, 255))
-                b = int(np.clip((base_color[2] + 1.0) * 127.5, 0, 255))
-                point_color = (r, g, b)
+                # Get point color for colorization (already in 0-255 RGB range)
+                point_color = point_colors[inspected_point_idx]
                 # Colorize sprite
                 colorized = scaled_sprite.copy()
                 color_array = pygame.surfarray.array3d(colorized)
