@@ -227,6 +227,20 @@ _TIMBRES = [
     _synth_wavefold, _synth_stutter,
 ]
 
+_TIMBRE_NAMES = (
+    "Supersaw pad", "Acid bass", "Synth pluck", "FM bass",
+    "Noise drone", "Ring mod", "PWM synth", "Organ",
+    "Wavefold", "Stutter",
+)
+
+_SCALE_NAMES = (
+    "Pentatonic minor", "Pentatonic major", "Suspended", "Dorian",
+    "Phrygian", "Whole tone", "Blues", "Harmonic minor",
+    "Lydian", "Mixolydian", "Locrian", "Japanese in-sen",
+)
+
+_TEMPO_LABELS = ("Ambient", "Slow", "Medium", "Fast", "Glitchy")
+
 # Discrete search space: 46 MIDI x 10 timbres x 12 scales x 5 tempos
 # x ~80 avg tone combos = 2,208,000+ unique configurations
 
@@ -284,6 +298,28 @@ def generate_sound(name_key: int) -> pygame.mixer.Sound:
     samples = (signal * 32767).astype(np.int16)
     stereo = np.column_stack((samples, samples))
     return pygame.sndarray.make_sound(stereo)
+
+
+def get_audio_params(name_key: int) -> dict:
+    """Extract audio parameters for a point without generating the signal.
+
+    Replays the same RNG sequence as generate_signal() to extract
+    timbre, scale, root note, and tempo selections.
+    """
+    rng = np.random.default_rng(name_key)
+    midi = int(rng.integers(25, 71))
+    timbre_idx = int(rng.integers(len(_TIMBRES)))
+    scale_idx = int(rng.integers(len(SCALES)))
+    tempo_idx = int(rng.integers(len(TEMPO_RANGES)))
+    root_hz = 440.0 * 2 ** ((midi - 69) / 12.0)
+    return {
+        "timbre": _TIMBRE_NAMES[timbre_idx],
+        "scale": _SCALE_NAMES[scale_idx],
+        "tempo": _TEMPO_LABELS[tempo_idx],
+        "root_hz": round(root_hz, 1),
+        "midi": midi,
+        "summary": f"{_TIMBRE_NAMES[timbre_idx]} in {_SCALE_NAMES[scale_idx].lower()}",
+    }
 
 
 def update_audio(visible_indices, visible_distances, name_keys):
