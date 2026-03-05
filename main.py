@@ -7,6 +7,8 @@ from sphere import (
     random_point_on_s3,
     angular_distance,
     visible_points,
+    build_visibility_kdtree,
+    query_visible_kdtree,
     tangent_basis,
     rotate_frame,
     reorthogonalize_frame,
@@ -88,6 +90,9 @@ for _i in range(3):
 
 points = random_point_on_s3(NUM_POINTS)
 
+# Build spatial index for fast visibility queries
+visibility_kdtree = build_visibility_kdtree(points)
+
 # Name keys: map each point index to a unique name via combinatorial index
 _name_keys = np.random.default_rng(GAME_SEED).choice(TOTAL_NAMES, NUM_POINTS, replace=False)
 point_name_cache = {}
@@ -142,7 +147,9 @@ drag_start = None
 def update_visible():
     global visible_indices, visible_distances, point_identicon_cache
     prev_set = set(visible_indices)  # cache state before update
-    vis_points, indices = visible_points(player_pos, points, FOV_ANGLE)
+
+    # Use KDTree for sub-linear visibility query
+    vis_points, indices = query_visible_kdtree(visibility_kdtree, player_pos, points, FOV_ANGLE)
     distances = [angular_distance(player_pos, points[i]) for i in indices]
     sorted_pairs = sorted(zip(indices, distances), key=lambda x: x[1])
     visible_indices = [p[0] for p in sorted_pairs]
