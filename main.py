@@ -1,8 +1,10 @@
 import pygame
 import numpy as np
+import math
+from collections import deque
 from io import BytesIO
 from pydenticon import Generator
-from audio import init_audio, update_audio, cleanup_audio
+from audio import init_audio, update_audio, cleanup_audio, get_audio_params
 from sphere import (
     random_point_on_s3,
     angular_distance,
@@ -58,6 +60,14 @@ ROTATION_SPEED = 0.02  # radians per frame for WASD/QE
 TRAVEL_SPEED = 0.000008  # slerp progress per frame
 POP_DURATION = 400  # milliseconds for arrival pop animation
 TRIANGLE_PERIOD = 6000.0  # milliseconds for one full triangle rotation
+
+# Starfield: random 4D directions for parallax background
+NUM_STARS = 200
+_star_rng = np.random.default_rng(seed=123)
+_star_dirs = _star_rng.standard_normal((NUM_STARS, 4))
+_star_dirs /= np.linalg.norm(_star_dirs, axis=1, keepdims=True)
+_star_brightness = _star_rng.uniform(0.15, 0.6, NUM_STARS)
+_star_sizes = _star_rng.choice([1, 1, 1, 2], NUM_STARS)
 
 # Distance color mapping: green (near) -> yellow (mid) -> red (far)
 def distance_to_color(dist):
@@ -135,8 +145,21 @@ pop_animation_start_time = None
 
 # Auto-travel (Tab key) system
 visited_points = set()  # Indices of points already traveled-to
+visit_history = deque(maxlen=50)  # Ordered trail of visited point indices
 auto_travel_feedback = None  # (message, timestamp) or None
 auto_travel_feedback_duration = 2000  # milliseconds
+
+# Radial menu state
+HOLD_THRESHOLD = 200  # ms before radial menu opens
+MENU_RADIUS = 50  # pixel radius of radial menu
+WEDGE_INNER = 15  # inner dead zone radius
+menu_state = "idle"  # idle | hold_pending | menu_open
+menu_hold_start = 0  # tick when mouse went down on a point
+menu_point_idx = None  # point index the menu is for
+menu_center = None  # (x, y) screen position of menu
+
+# Detail panel state
+inspected_point_idx = None  # point currently inspected (panel open)
 
 
 def find_nearest_unvisited(visible_idx_list, visible_dist_list):
@@ -321,7 +344,14 @@ while running:
                     search_text += event.unicode
                 # Allow UP/DOWN to scroll list even while searching (fall through handled by keys[] above)
             else:
-                if event.key == pygame.K_v:
+                if event.key == pygame.K_ESCAPE:
+                    if inspected_point_idx is not None:
+                        inspected_point_idx = None
+                    elif menu_state != "idle":
+                        menu_state = "idle"
+                        menu_point_idx = None
+                        menu_center = None
+                elif event.key == pygame.K_v:
                     view_mode = 1 - view_mode  # toggle 0/1
                 elif event.key == pygame.K_b:
                     save_bookmark()
@@ -335,45 +365,117 @@ while running:
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
                 mx, my = event.pos
+                # Dismiss detail panel on click outside it
+                if inspected_point_idx is not None and menu_state == "idle":
+                    # Simple dismiss: any new click clears the panel
+                    # (unless it leads to a new inspection via radial menu)
+                    inspected_point_idx = None
                 dragging = True
                 drag_start = (mx, my)
+                # Check if click is on a viewport point for potential radial menu
+                if mx <= SCREEN_WIDTH - 300 and last_projected_points:
+                    best_dist_sq = float("inf")
+                    best_idx = None
+                    best_p2d = None
+                    for p2d, ang, dep, idx in last_projected_points:
+                        dx, dy = mx - p2d[0], my - p2d[1]
+                        d_sq = dx * dx + dy * dy
+                        if d_sq < best_dist_sq:
+                            best_dist_sq = d_sq
+                            best_idx = idx
+                            best_p2d = p2d
+                    if best_idx is not None and best_dist_sq < 400:
+                        menu_state = "hold_pending"
+                        menu_hold_start = pygame.time.get_ticks()
+                        menu_point_idx = best_idx
+                        menu_center = best_p2d.astype(int)
         elif event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:  # Left click release
-                if dragging and drag_start is not None:
-                    # Only trigger click-to-travel if drag distance was minimal
-                    mx, my = event.pos
-                    drag_dist_sq = (mx - drag_start[0]) ** 2 + (my - drag_start[1]) ** 2
-                    if drag_dist_sq < 100:  # within 10px threshold
-                        # Resolve clicked point index
-                        clicked_idx = None
-                        if mx > SCREEN_WIDTH - 300:
-                            item_idx = (my - list_start_y) // 40 + list_scroll
-                            if 0 <= item_idx < len(filtered_indices):
-                                clicked_idx = filtered_indices[item_idx]
-                        elif last_projected_points:
-                            best_dist_sq = float("inf")
-                            best_idx = None
-                            for p2d, ang, dep, idx in last_projected_points:
-                                dx, dy = mx - p2d[0], my - p2d[1]
-                                d_sq = dx * dx + dy * dy
-                                if d_sq < best_dist_sq:
-                                    best_dist_sq = d_sq
-                                    best_idx = idx
-                            if best_idx is not None and best_dist_sq < 400:
-                                clicked_idx = best_idx
+                mx, my = event.pos
+                if menu_state == "menu_open":
+                    # Check which wedge the mouse is in
+                    dx = mx - menu_center[0]
+                    dy = my - menu_center[1]
+                    dist = (dx * dx + dy * dy) ** 0.5
+                    if WEDGE_INNER < dist < MENU_RADIUS:
+                        angle = math.atan2(-dy, dx)  # negative dy for screen coords
+                        wedge = int((angle + math.pi) / (math.pi / 2) + 2) % 4
+                        if wedge == 0:  # Info wedge (right)
+                            inspected_point_idx = menu_point_idx
+                        # wedges 1,2,3 are placeholders — no action
+                    menu_state = "idle"
+                    menu_point_idx = None
+                    menu_center = None
+                elif menu_state == "hold_pending":
+                    # Released before threshold — treat as normal click
+                    menu_state = "idle"
+                    if dragging and drag_start is not None:
+                        drag_dist_sq = (mx - drag_start[0]) ** 2 + (my - drag_start[1]) ** 2
+                        if drag_dist_sq < 100:
+                            clicked_idx = None
+                            if mx > SCREEN_WIDTH - 300:
+                                item_idx = (my - list_start_y) // 40 + list_scroll
+                                if 0 <= item_idx < len(filtered_indices):
+                                    clicked_idx = filtered_indices[item_idx]
+                            elif last_projected_points:
+                                best_dist_sq = float("inf")
+                                best_idx = None
+                                for p2d, ang, dep, idx in last_projected_points:
+                                    dx, dy = mx - p2d[0], my - p2d[1]
+                                    d_sq = dx * dx + dy * dy
+                                    if d_sq < best_dist_sq:
+                                        best_dist_sq = d_sq
+                                        best_idx = idx
+                                if best_idx is not None and best_dist_sq < 400:
+                                    clicked_idx = best_idx
+                            if clicked_idx is not None:
+                                if traveling:
+                                    queued_target_idx = clicked_idx
+                                    queued_target = points[clicked_idx]
+                                else:
+                                    travel_target_idx = clicked_idx
+                                    travel_target = points[clicked_idx]
+                                    traveling = True
+                                    travel_progress = 0.0
+                                    pop_animation_idx = None
+                                    pop_animation_start_time = None
+                    menu_point_idx = None
+                    menu_center = None
+                else:
+                    # Normal release (no menu involved) — existing behavior
+                    if dragging and drag_start is not None:
+                        drag_dist_sq = (mx - drag_start[0]) ** 2 + (my - drag_start[1]) ** 2
+                        if drag_dist_sq < 100:  # within 10px threshold
+                            # Resolve clicked point index
+                            clicked_idx = None
+                            if mx > SCREEN_WIDTH - 300:
+                                item_idx = (my - list_start_y) // 40 + list_scroll
+                                if 0 <= item_idx < len(filtered_indices):
+                                    clicked_idx = filtered_indices[item_idx]
+                            elif last_projected_points:
+                                best_dist_sq = float("inf")
+                                best_idx = None
+                                for p2d, ang, dep, idx in last_projected_points:
+                                    dx, dy = mx - p2d[0], my - p2d[1]
+                                    d_sq = dx * dx + dy * dy
+                                    if d_sq < best_dist_sq:
+                                        best_dist_sq = d_sq
+                                        best_idx = idx
+                                if best_idx is not None and best_dist_sq < 400:
+                                    clicked_idx = best_idx
 
-                        if clicked_idx is not None:
-                            if traveling:
-                                # Queue — will start after current travel completes
-                                queued_target_idx = clicked_idx
-                                queued_target = points[clicked_idx]
-                            else:
-                                travel_target_idx = clicked_idx
-                                travel_target = points[clicked_idx]
-                                traveling = True
-                                travel_progress = 0.0
-                                pop_animation_idx = None
-                                pop_animation_start_time = None
+                            if clicked_idx is not None:
+                                if traveling:
+                                    # Queue — will start after current travel completes
+                                    queued_target_idx = clicked_idx
+                                    queued_target = points[clicked_idx]
+                                else:
+                                    travel_target_idx = clicked_idx
+                                    travel_target = points[clicked_idx]
+                                    traveling = True
+                                    travel_progress = 0.0
+                                    pop_animation_idx = None
+                                    pop_animation_start_time = None
                 dragging = False
                 drag_start = None
         elif event.type == pygame.MOUSEMOTION:
@@ -383,6 +485,11 @@ while running:
                 hovered_item = item_idx if 0 <= item_idx < len(filtered_indices) else None
             elif dragging:
                 hovered_item = None
+
+    # Check hold threshold for radial menu
+    if menu_state == "hold_pending":
+        if pygame.time.get_ticks() - menu_hold_start >= HOLD_THRESHOLD:
+            menu_state = "menu_open"
 
     # Update travel
     if traveling and travel_target is not None:
@@ -408,6 +515,7 @@ while running:
             # Travel complete — mark as visited
             if travel_target_idx is not None:
                 visited_points.add(travel_target_idx)
+                visit_history.append(travel_target_idx)
                 auto_travel_feedback = (f"Visited: {get_name(travel_target_idx)}", pygame.time.get_ticks())
                 print(f"Visited: {get_name(travel_target_idx)} ({len(visited_points)} total)")
 
@@ -428,8 +536,21 @@ while running:
     # Render
     screen.fill(BG_COLOR)
 
-    # Project visible points into camera's tangent space
+    # Render starfield with parallax from camera orientation
     view_width = SCREEN_WIDTH - 300
+    star_parallax_scale = 300
+    for si in range(NUM_STARS):
+        sx = np.dot(_star_dirs[si], orientation[1]) * star_parallax_scale
+        sy = np.dot(_star_dirs[si], orientation[2]) * star_parallax_scale
+        px = int((sx % view_width + view_width) % view_width)
+        py = int((sy % SCREEN_HEIGHT + SCREEN_HEIGHT) % SCREEN_HEIGHT)
+        if px < view_width:
+            c = int(_star_brightness[si] * 255)
+            pygame.draw.circle(screen, (c, c, int(c * 0.9)), (px, py), int(_star_sizes[si]))
+
+    center_x, center_y = view_width // 2, SCREEN_HEIGHT // 2
+
+    # Project visible points into camera's tangent space
     basis = [orientation[1], orientation[2], orientation[3]]
     player_screen_offset = project_to_tangent(camera_pos, player_pos, basis)
 
@@ -477,7 +598,22 @@ while running:
 
             brightness_factor = 0.3 + normalized_dist * 0.7
             color = tuple(int(c * brightness_factor) for c in base_color)
+
+            # Glow halo behind point
+            glow_radius = int(radius * 2.5 + normalized_dist * 8)
+            glow_alpha = int(30 + normalized_dist * 60)
+            glow_surf = pygame.Surface((glow_radius * 2 + 4, glow_radius * 2 + 4), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (*color, glow_alpha), (glow_radius + 2, glow_radius + 2), glow_radius)
+            screen.blit(glow_surf, (int(p2d[0]) - glow_radius - 2, int(p2d[1]) - glow_radius - 2))
+
             pygame.draw.circle(screen, color, p2d.astype(int), radius)
+
+            # Inspection ring on currently inspected point
+            if idx == inspected_point_idx:
+                ring_radius = radius + 10
+                ring_surf = pygame.Surface((ring_radius * 2 + 4, ring_radius * 2 + 4), pygame.SRCALPHA)
+                pygame.draw.circle(ring_surf, (255, 200, 50, 160), (ring_radius + 2, ring_radius + 2), ring_radius, 2)
+                screen.blit(ring_surf, (int(p2d[0]) - ring_radius - 2, int(p2d[1]) - ring_radius - 2))
 
             # Check if mouse is near this point (within radius + margin)
             dx, dy = mx - p2d[0], my - p2d[1]
@@ -486,6 +622,24 @@ while running:
             if dist_sq < hit_radius * hit_radius and dist_sq < hover_dist_sq_min:
                 hover_dist_sq_min = dist_sq
                 hover_point = (p2d, angular_dist, idx)
+
+    # Draw breadcrumb trail: fading dots for recently visited points
+    if visit_history:
+        trail_len = len(visit_history)
+        for trail_i, trail_idx in enumerate(visit_history):
+            trail_p4d = points[trail_idx]
+            trail_tangent = project_to_tangent(camera_pos, trail_p4d, basis)
+            trail_tangent[0] -= player_screen_offset[0]
+            trail_tangent[1] -= player_screen_offset[1]
+            trail_p2d, trail_depth = project_tangent_to_screen(trail_tangent, view_width, SCREEN_HEIGHT)
+            tx, ty = int(trail_p2d[0]), int(trail_p2d[1])
+            if 0 <= tx < view_width and 0 <= ty < SCREEN_HEIGHT:
+                fade = (trail_i + 1) / trail_len
+                alpha = int(30 + fade * 100)
+                dot_radius = 3 if fade > 0.5 else 2
+                dot_surf = pygame.Surface((dot_radius * 2 + 4, dot_radius * 2 + 4), pygame.SRCALPHA)
+                pygame.draw.circle(dot_surf, (180, 220, 255, alpha), (dot_radius + 2, dot_radius + 2), dot_radius)
+                screen.blit(dot_surf, (tx - dot_radius - 2, ty - dot_radius - 2))
 
     # Draw white circle around hovered list item point
     if hovered_item is not None and 0 <= hovered_item < len(filtered_indices):
@@ -522,6 +676,38 @@ while running:
                     pygame.draw.circle(temp_surf, (100, 150, 255, alpha), (expand_radius + 2, expand_radius + 2), expand_radius)
                     screen.blit(temp_surf, (int(p2d[0]) - expand_radius - 2, int(p2d[1]) - expand_radius - 2))
                     break
+
+    # Draw animated travel line from crosshair to target
+    if traveling and travel_target_idx is not None and pop_animation_idx is None:
+        target_screen = None
+        for p2d, angular_dist, depth, idx in projected_points:
+            if idx == travel_target_idx:
+                target_screen = p2d.astype(int)
+                break
+        if target_screen is not None:
+            line_start = np.array([center_x, center_y])
+            line_end = target_screen
+            diff = line_end - line_start
+            line_length = np.linalg.norm(diff)
+            if line_length > 5:
+                direction = diff / line_length
+                dash_len, gap_len = 8, 6
+                cycle = dash_len + gap_len
+                offset = (pygame.time.get_ticks() * 0.05) % cycle
+                travel_line_surf = pygame.Surface((view_width, SCREEN_HEIGHT), pygame.SRCALPHA)
+                pos = -offset
+                while pos < line_length:
+                    seg_start = max(0.0, pos)
+                    seg_end = min(line_length, pos + dash_len)
+                    if seg_end > seg_start:
+                        p1 = line_start + direction * seg_start
+                        p2_line = line_start + direction * seg_end
+                        mid_t = (seg_start + seg_end) / (2 * line_length)
+                        alpha = max(30, min(120, int(120 * (1 - abs(mid_t - 0.5) * 1.5))))
+                        pygame.draw.line(travel_line_surf, (100, 150, 255, alpha),
+                                        p1.astype(int), p2_line.astype(int), 2)
+                    pos += cycle
+                screen.blit(travel_line_surf, (0, 0))
 
     # Draw rotating blue triangles around travel target (hide once pop starts)
     if traveling and travel_target_idx is not None and pop_animation_idx is None:
@@ -563,7 +749,6 @@ while running:
                 break
 
     # Draw camera position crosshair at center of view area
-    center_x, center_y = view_width // 2, SCREEN_HEIGHT // 2
     crosshair_radius = 12
     crosshair_size = 8
 
@@ -616,6 +801,94 @@ while running:
         # Draw identicon and label
         screen.blit(identicon, (tx, ty + (tooltip_height - 32) // 2))
         screen.blit(label_surface, (tx + 32 + 4, ty + (tooltip_height - label_rect.height) // 2))
+
+    # Draw radial menu
+    if menu_state == "menu_open" and menu_center is not None:
+        mx_now, my_now = pygame.mouse.get_pos()
+        dx_menu = mx_now - menu_center[0]
+        dy_menu = my_now - menu_center[1]
+        hover_dist = (dx_menu * dx_menu + dy_menu * dy_menu) ** 0.5
+        hover_angle = math.atan2(-dy_menu, dx_menu)
+        hover_wedge = int((hover_angle + math.pi) / (math.pi / 2) + 2) % 4 if WEDGE_INNER < hover_dist < MENU_RADIUS else -1
+
+        menu_surf = pygame.Surface((MENU_RADIUS * 2 + 4, MENU_RADIUS * 2 + 4), pygame.SRCALPHA)
+        mc = MENU_RADIUS + 2  # center of surface
+
+        # Draw background circle
+        pygame.draw.circle(menu_surf, (20, 20, 40, 180), (mc, mc), MENU_RADIUS)
+
+        # Draw wedge labels
+        wedge_labels = ["Info", "A", "B", "C"]
+        wedge_colors = [(100, 200, 255), (100, 100, 120), (100, 100, 120), (100, 100, 120)]
+        wedge_angles = [0, math.pi / 2, math.pi, 3 * math.pi / 2]  # right, down-ish, left, up-ish (screen coords inverted)
+        for wi, (label, color, wa) in enumerate(zip(wedge_labels, wedge_colors, wedge_angles)):
+            # Wedge center position
+            wr = (WEDGE_INNER + MENU_RADIUS) / 2
+            wx = mc + int(wr * math.cos(wa))
+            wy = mc - int(wr * math.sin(wa))  # invert y for screen
+            # Highlight hovered wedge
+            if wi == hover_wedge:
+                pygame.draw.circle(menu_surf, (*color, 60), (wx, wy), 18)
+            lbl = font.render(label, True, color if wi == 0 else (80, 80, 100))
+            menu_surf.blit(lbl, (wx - lbl.get_width() // 2, wy - lbl.get_height() // 2))
+
+        # Inner dead zone circle
+        pygame.draw.circle(menu_surf, (30, 30, 50, 200), (mc, mc), WEDGE_INNER)
+
+        screen.blit(menu_surf, (menu_center[0] - mc, menu_center[1] - mc))
+
+    # Draw detail panel for inspected point
+    if inspected_point_idx is not None:
+        # Find screen position of inspected point
+        panel_anchor = None
+        for p2d, angular_dist, depth, idx in last_projected_points:
+            if idx == inspected_point_idx:
+                panel_anchor = p2d.astype(int)
+                panel_dist = angular_dist
+                break
+
+        if panel_anchor is not None:
+            name = get_name(inspected_point_idx)
+            coords = points[inspected_point_idx]
+            audio_info = get_audio_params(int(_name_keys[inspected_point_idx]))
+
+            lines = [
+                name,
+                f"Dist: {format_dist(panel_dist)}",
+                f"4D: ({coords[0]:+.3f}, {coords[1]:+.3f}, {coords[2]:+.3f}, {coords[3]:+.3f})",
+                f"Audio: {audio_info['summary']}",
+                f"Root: {audio_info['root_hz']} Hz | Tempo: {audio_info['tempo']}",
+            ]
+
+            # Measure panel size
+            line_height = 16
+            padding = 8
+            max_w = max(font.size(line)[0] for line in lines)
+            panel_w = max_w + padding * 2
+            panel_h = len(lines) * line_height + padding * 2
+
+            # Position: offset right and above the anchor point
+            px = panel_anchor[0] + 20
+            py = panel_anchor[1] - panel_h - 10
+            # Keep on screen
+            if px + panel_w > SCREEN_WIDTH - 300:
+                px = panel_anchor[0] - panel_w - 20
+            if py < 0:
+                py = panel_anchor[1] + 20
+
+            panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            pygame.draw.rect(panel_surf, (20, 20, 40, 200), (0, 0, panel_w, panel_h), border_radius=4)
+            pygame.draw.rect(panel_surf, (255, 200, 50, 120), (0, 0, panel_w, panel_h), 1, border_radius=4)
+
+            for li, line in enumerate(lines):
+                color = (255, 200, 50) if li == 0 else TEXT_COLOR
+                lbl = font.render(line, True, color)
+                panel_surf.blit(lbl, (padding, padding + li * line_height))
+
+            screen.blit(panel_surf, (px, py))
+        else:
+            # Inspected point not visible — keep panel state but skip render
+            pass
 
     # Draw divider line
     pygame.draw.line(
