@@ -947,9 +947,8 @@ while running:
             pygame.draw.rect(panel_surf, (255, 200, 50, 120), (0, 0, panel_w, panel_h), 1, border_radius=4)
 
             # Draw large sprite at top of panel
-            sprite_idx = get_planet_sprite(inspected_point_idx)
-            if sprite_idx is not None and sprite_idx in PLANET_SPRITES:
-                sprite = PLANET_SPRITES[sprite_idx]
+            sprite = get_planet_sprite(inspected_point_idx)
+            if sprite is not None:
                 scaled_sprite = pygame.transform.scale(sprite, (sprite_size, sprite_size))
                 # Get point color for colorization
                 _, _, base_color = colors[inspected_point_idx]
