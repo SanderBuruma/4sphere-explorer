@@ -356,5 +356,23 @@ class TestAudioQuality(unittest.TestCase):
             self.assertLess(dc, 0.05, f"Key {key}: DC offset {dc:.4f}")
 
 
+class TestAllPointsAudible(unittest.TestCase):
+    """Every point on the sphere must produce audible (non-silent) music."""
+
+    def test_100_random_points_have_audible_signal(self):
+        """100 random name keys from the actual name space must produce RMS > 0.01."""
+        from audio import generate_signal
+        rng = np.random.default_rng(77)
+        keys = rng.choice(TOTAL_NAMES, size=100, replace=False)
+        for key in keys:
+            key = int(key)
+            signal = generate_signal(key)
+            rms = np.sqrt(np.mean(signal ** 2))
+            self.assertGreater(
+                rms, 0.01,
+                f"Key {key} (name: {decode_name(key)}) is silent: RMS={rms:.6f}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
