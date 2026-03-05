@@ -958,8 +958,24 @@ while running:
                 color_array[:,:,0] = (color_array[:,:,0] * point_color[0] // 255).clip(0, 255)
                 color_array[:,:,1] = (color_array[:,:,1] * point_color[1] // 255).clip(0, 255)
                 color_array[:,:,2] = (color_array[:,:,2] * point_color[2] // 255).clip(0, 255)
+
+                # Apply random rotation and mirroring based on point hash
+                sprite_seed = (inspected_point_idx * 73) % 360  # Deterministic rotation per point
+                rotation_angle = sprite_seed % 360
+                should_flip = (inspected_point_idx * 157) % 2 == 0  # Deterministic 50% flip per point
+
+                # Apply transformations
+                rotated = pygame.transform.rotate(colorized, rotation_angle)
+                if should_flip:
+                    rotated = pygame.transform.flip(rotated, True, False)
+
+                # Center the rotated sprite (may be larger due to rotation)
+                rotated_rect = rotated.get_rect(center=(sprite_size // 2, sprite_size // 2))
+                sprite_display = pygame.Surface((sprite_size, sprite_size), pygame.SRCALPHA)
+                sprite_display.blit(rotated, rotated_rect)
+
                 sprite_x = (panel_w - sprite_size) // 2
-                panel_surf.blit(colorized, (sprite_x, padding))
+                panel_surf.blit(sprite_display, (sprite_x, padding))
 
             # Draw text below sprite
             text_y = sprite_size + padding * 2
