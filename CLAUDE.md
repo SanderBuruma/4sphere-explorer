@@ -60,7 +60,8 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - `main.py` — Game loop, rendering, UI, input handling
 - `sphere.py` — S³ math (point generation, distance, slerp, tangent space projection, orientation frame rotation, name decoding, colors)
 - `audio.py` — Procedural techno ambient music (synthesis, caching, proximity-based playback)
-- `test_sphere.py` — Unit tests (point count, FOV visibility, travel speed, name format, travel queue, rotation smoothness, audio volume/quality)
+- `tests/test_sphere.py` — Sphere math, navigation, and name generation tests (22 tests)
+- `tests/test_audio.py` — Audio signal generation and quality tests (17 tests)
 - `assets/planets/` — 10 planet sprite PNGs (64×64) + `planet_index.txt` manifest
 - `.gitignore` — venv exclusions
 

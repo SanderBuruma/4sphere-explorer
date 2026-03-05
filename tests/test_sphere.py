@@ -1,8 +1,26 @@
+import os
+import sys
 import unittest
+
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from sphere import (
-    random_point_on_s3, visible_points, angular_distance, slerp,
-    decode_name, TOTAL_NAMES, SUFFIXES, _N_CORE, _N_END, _N_SUF,
+    angular_distance,
+    build_visibility_kdtree,
+    decode_name,
+    project_to_tangent,
+    query_visible_kdtree,
+    random_point_on_s3,
+    slerp,
+    tangent_basis,
+    visible_points,
+    TOTAL_NAMES,
+    SUFFIXES,
+    _N_CORE,
+    _N_END,
+    _N_SUF,
 )
 
 NUM_POINTS = 30_000
@@ -105,7 +123,7 @@ class TestTravelQueue(unittest.TestCase):
         self.assertLess(angular_distance(pos, target), ARRIVAL_THRESHOLD)
 
     def test_queue_activates_after_arrival(self):
-        """Simulate: travel to A, queue B, arrive at A → traveling to B."""
+        """Simulate: travel to A, queue B, arrive at A -> traveling to B."""
         player = np.array([1.0, 0.0, 0.0, 0.0])
         np.random.seed(7)
         pts = random_point_on_s3(2)
@@ -134,7 +152,7 @@ class TestTravelQueue(unittest.TestCase):
 
 
 class TestRelativeRotation(unittest.TestCase):
-    """Verify QWEADS relative rotations are smooth and consistent everywhere on S³."""
+    """Verify QWEADS relative rotations are smooth and consistent everywhere on S3."""
 
     ROTATION_SPEED = 0.02
     KEYS = "wasdeq"
@@ -147,7 +165,6 @@ class TestRelativeRotation(unittest.TestCase):
 
     def _make_frame(self, cam):
         """Build initial orientation frame at camera position."""
-        from sphere import tangent_basis
         frame = np.eye(4)
         frame[0] = cam / np.linalg.norm(cam)
         basis = tangent_basis(frame[0])
@@ -165,7 +182,7 @@ class TestRelativeRotation(unittest.TestCase):
         return frame[0].copy()
 
     def test_unit_norm_preserved(self):
-        """Camera stays on S³ after 1000 single-key rotation steps."""
+        """Camera stays on S3 after 1000 single-key rotation steps."""
         for key in self.KEYS:
             frame = self._make_frame(np.array([1.0, 0.0, 0.0, 0.0]))
             for _ in range(1000):
@@ -255,7 +272,7 @@ class TestRelativeRotation(unittest.TestCase):
             )
 
     def test_from_random_starting_positions(self):
-        """Single-key rotation is consistent from 20 random positions on S³."""
+        """Single-key rotation is consistent from 20 random positions on S3."""
         rng = np.random.default_rng(123)
         for _ in range(20):
             cam = rng.standard_normal(4)
@@ -271,107 +288,172 @@ class TestRelativeRotation(unittest.TestCase):
                 self.assertAlmostEqual(np.linalg.norm(new_cam), 1.0, places=10)
 
 
-class TestAudioVolumeLevels(unittest.TestCase):
-    """No single point's music should be significantly louder than the average."""
+class TestSphereMath(unittest.TestCase):
+    """Test core sphere math: angular distance and slerp."""
 
-    def test_rms_within_1_std(self):
-        """RMS of every sound in a 100-point sample must be within 1 std of the mean."""
-        from audio import generate_signal
-        rng = np.random.default_rng(0)
-        keys = rng.integers(0, 11_817_000, size=100)
-        rms_values = np.array([
-            np.sqrt(np.mean(generate_signal(int(k)) ** 2)) for k in keys
-        ])
-        mean_rms = rms_values.mean()
-        std_rms = rms_values.std()
-        for i, rms in enumerate(rms_values):
-            self.assertLessEqual(
-                rms, mean_rms + std_rms + 0.01,
-                f"Key {keys[i]}: RMS {rms:.4f} exceeds mean {mean_rms:.4f} + 1 std {std_rms:.4f}",
+    def test_angular_distance_self_is_zero(self):
+        """Distance from point to itself is approximately 0."""
+        rng = np.random.default_rng(42)
+        for _ in range(20):
+            p = rng.standard_normal(4)
+            p /= np.linalg.norm(p)
+            self.assertAlmostEqual(angular_distance(p, p), 0.0, places=6)
+
+    def test_angular_distance_antipodal_is_pi(self):
+        """Distance between p and -p is approximately pi."""
+        rng = np.random.default_rng(43)
+        for _ in range(20):
+            p = rng.standard_normal(4)
+            p /= np.linalg.norm(p)
+            self.assertAlmostEqual(angular_distance(p, -p), np.pi, places=6)
+
+    def test_angular_distance_symmetric(self):
+        """d(a,b) == d(b,a) for random pairs."""
+        rng = np.random.default_rng(44)
+        for _ in range(50):
+            a = rng.standard_normal(4)
+            a /= np.linalg.norm(a)
+            b = rng.standard_normal(4)
+            b /= np.linalg.norm(b)
+            self.assertAlmostEqual(
+                angular_distance(a, b), angular_distance(b, a), places=14
             )
 
+    def test_angular_distance_triangle_inequality(self):
+        """d(a,c) <= d(a,b) + d(b,c) for random triples."""
+        rng = np.random.default_rng(45)
+        for _ in range(50):
+            pts = rng.standard_normal((3, 4))
+            pts /= np.linalg.norm(pts, axis=1, keepdims=True)
+            a, b, c = pts
+            dac = angular_distance(a, c)
+            dab = angular_distance(a, b)
+            dbc = angular_distance(b, c)
+            self.assertLessEqual(dac, dab + dbc + 1e-10)
 
-class TestAudioSearchSpace(unittest.TestCase):
-    """Music generation must have sufficient variety."""
+    def test_slerp_t0_returns_start(self):
+        """slerp(p, q, 0) is approximately p."""
+        rng = np.random.default_rng(46)
+        for _ in range(20):
+            p = rng.standard_normal(4)
+            p /= np.linalg.norm(p)
+            q = rng.standard_normal(4)
+            q /= np.linalg.norm(q)
+            result = slerp(p, q, 0.0)
+            np.testing.assert_allclose(result, p, atol=1e-12)
 
-    def test_search_space_above_2_million(self):
-        """Discrete search space must exceed 2 million configurations."""
-        from audio import SCALES, TEMPO_RANGES, _TIMBRES
-        # Conservative lower bound: MIDI × timbres × scales × tempos × min pattern combos
-        midi_range = 46  # MIDI 25-70
-        n_timbres = len(_TIMBRES)
-        n_scales = len(SCALES)
-        n_tempos = len(TEMPO_RANGES)
-        min_pat_len = 12
-        min_scale_size = min(len(s) for s in SCALES)
-        # Each step: rest or one of 5 moves = ~5.6 effective choices
-        # Conservative: use scale size as branching factor
-        melody_combos = min_scale_size ** min_pat_len
-        total = midi_range * n_timbres * n_scales * n_tempos * melody_combos
-        self.assertGreater(total, 2_000_000,
-            f"Search space {total:,} is below 2 million")
+    def test_slerp_t1_returns_end(self):
+        """slerp(p, q, 1) is approximately q."""
+        rng = np.random.default_rng(47)
+        for _ in range(20):
+            p = rng.standard_normal(4)
+            p /= np.linalg.norm(p)
+            q = rng.standard_normal(4)
+            q /= np.linalg.norm(q)
+            result = slerp(p, q, 1.0)
+            np.testing.assert_allclose(result, q, atol=1e-10)
 
+    def test_slerp_unit_norm_along_path(self):
+        """Norm is approximately 1 at t=0.25, 0.5, 0.75."""
+        rng = np.random.default_rng(48)
+        for _ in range(20):
+            p = rng.standard_normal(4)
+            p /= np.linalg.norm(p)
+            q = rng.standard_normal(4)
+            q /= np.linalg.norm(q)
+            for t in [0.25, 0.5, 0.75]:
+                result = slerp(p, q, t)
+                self.assertAlmostEqual(np.linalg.norm(result), 1.0, places=10)
 
-class TestAudioQuality(unittest.TestCase):
-    """Generated sounds must be smooth, low-pitched, and free of artifacts."""
-
-    def test_sound_quality_1000_random(self):
-        """50 random sounds: low spectral centroid, no clicks, no high-freq shrillness."""
-        from audio import generate_signal, SAMPLE_RATE
-        rng = np.random.default_rng()  # non-deterministic
-        keys = rng.integers(0, 11_817_000, size=50)
-
-        for key in keys:
-            key = int(key)
-            signal = generate_signal(key)
-            n = len(signal)
-
-            # Sanity: no NaN/Inf, bounded to [-1, 1]
-            self.assertFalse(np.any(np.isnan(signal)), f"Key {key}: NaN in signal")
-            self.assertFalse(np.any(np.isinf(signal)), f"Key {key}: Inf in signal")
-            self.assertGreaterEqual(signal.min(), -1.0, f"Key {key}: signal below -1.0")
-            self.assertLessEqual(signal.max(), 1.0, f"Key {key}: signal above 1.0")
-
-            # Spectral centroid < 500 Hz — not shrill
-            fft_mag = np.abs(np.fft.rfft(signal))
-            freqs = np.fft.rfftfreq(n, 1.0 / SAMPLE_RATE)
-            power = fft_mag ** 2
-            total_power = np.sum(power)
-            centroid = np.sum(freqs * power) / total_power
-            self.assertLess(centroid, 500,
-                f"Key {key}: spectral centroid {centroid:.0f} Hz (shrill)")
-
-            # < 25% energy above 600 Hz — keeps sound warm
-            high_ratio = np.sum(power[freqs > 600]) / total_power
-            self.assertLess(high_ratio, 0.25,
-                f"Key {key}: {high_ratio:.1%} energy above 600 Hz")
-
-            # No clicks: max sample-to-sample jump < 0.5
-            max_diff = np.max(np.abs(np.diff(signal)))
-            self.assertLess(max_diff, 0.5,
-                f"Key {key}: max sample diff {max_diff:.4f} (click/pop)")
-
-            # No DC offset (mean near zero)
-            dc = abs(np.mean(signal))
-            self.assertLess(dc, 0.05, f"Key {key}: DC offset {dc:.4f}")
+    def test_slerp_midpoint_equidistant(self):
+        """d(p, slerp(0.5)) is approximately d(slerp(0.5), q)."""
+        rng = np.random.default_rng(49)
+        for _ in range(20):
+            p = rng.standard_normal(4)
+            p /= np.linalg.norm(p)
+            q = rng.standard_normal(4)
+            q /= np.linalg.norm(q)
+            mid = slerp(p, q, 0.5)
+            d1 = angular_distance(p, mid)
+            d2 = angular_distance(mid, q)
+            self.assertAlmostEqual(d1, d2, places=10)
 
 
-class TestAllPointsAudible(unittest.TestCase):
-    """Every point on the sphere must produce audible (non-silent) music."""
+class TestTangentProjection(unittest.TestCase):
+    """Test tangent basis construction and projection."""
 
-    def test_100_random_points_have_audible_signal(self):
-        """100 random name keys from the actual name space must produce RMS > 0.01."""
-        from audio import generate_signal
-        rng = np.random.default_rng(77)
-        keys = rng.choice(TOTAL_NAMES, size=100, replace=False)
-        for key in keys:
-            key = int(key)
-            signal = generate_signal(key)
-            rms = np.sqrt(np.mean(signal ** 2))
-            self.assertGreater(
-                rms, 0.01,
-                f"Key {key} (name: {decode_name(key)}) is silent: RMS={rms:.6f}",
-            )
+    def test_tangent_basis_orthonormal(self):
+        """3 vectors, unit norm, mutually orthogonal, perpendicular to cam from 10+ random positions."""
+        rng = np.random.default_rng(50)
+        for _ in range(15):
+            cam = rng.standard_normal(4)
+            cam /= np.linalg.norm(cam)
+            basis = tangent_basis(cam)
+            self.assertEqual(len(basis), 3)
+            # Unit norm
+            for v in basis:
+                self.assertAlmostEqual(np.linalg.norm(v), 1.0, places=10)
+            # Perpendicular to cam
+            for v in basis:
+                self.assertAlmostEqual(np.dot(v, cam), 0.0, places=10)
+            # Mutually orthogonal
+            for i in range(3):
+                for j in range(i + 1, 3):
+                    self.assertAlmostEqual(
+                        np.dot(basis[i], basis[j]), 0.0, places=10
+                    )
+
+    def test_project_to_tangent_degenerate(self):
+        """Colocated returns zero, antipodal does not NaN."""
+        cam = np.array([1.0, 0.0, 0.0, 0.0])
+        basis = tangent_basis(cam)
+        # Colocated
+        result = project_to_tangent(cam, cam, basis)
+        np.testing.assert_allclose(result, np.zeros(3), atol=1e-10)
+        # Antipodal
+        result = project_to_tangent(cam, -cam, basis)
+        self.assertFalse(np.any(np.isnan(result)))
+
+    def test_project_to_tangent_distance_proportional(self):
+        """Output magnitude tracks angular distance."""
+        rng = np.random.default_rng(51)
+        cam = rng.standard_normal(4)
+        cam /= np.linalg.norm(cam)
+        basis = tangent_basis(cam)
+
+        # Generate points at varying distances
+        magnitudes = []
+        distances = []
+        for _ in range(30):
+            p = rng.standard_normal(4)
+            p /= np.linalg.norm(p)
+            d = angular_distance(cam, p)
+            if d < 1e-4 or d > np.pi - 1e-4:
+                continue
+            proj = project_to_tangent(cam, p, basis)
+            magnitudes.append(np.linalg.norm(proj))
+            distances.append(d)
+
+        # Correlation should be strongly positive
+        if len(magnitudes) > 5:
+            corr = np.corrcoef(distances, magnitudes)[0, 1]
+            self.assertGreater(corr, 0.9, f"Correlation {corr:.3f} too low")
+
+    def test_kdtree_visible_matches_brute_force(self):
+        """Compare visible_points vs query_visible_kdtree for 20 random cameras."""
+        np.random.seed(42)
+        points = random_point_on_s3(NUM_POINTS)
+        kdtree = build_visibility_kdtree(points)
+        rng = np.random.default_rng(52)
+
+        for _ in range(20):
+            cam = rng.standard_normal(4)
+            cam /= np.linalg.norm(cam)
+            _, brute_idx = visible_points(cam, points, FOV_ANGLE)
+            _, kd_idx = query_visible_kdtree(kdtree, cam, points, FOV_ANGLE)
+            brute_set = set(brute_idx.tolist())
+            kd_set = set(kd_idx.tolist())
+            self.assertEqual(brute_set, kd_set)
 
 
 if __name__ == "__main__":
