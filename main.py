@@ -133,6 +133,52 @@ queued_target_idx = None
 pop_animation_idx = None
 pop_animation_start_time = None
 
+# Auto-travel (Tab key) system
+visited_points = set()  # Indices of points already traveled-to
+auto_travel_feedback = None  # (message, timestamp) or None
+auto_travel_feedback_duration = 2000  # milliseconds
+
+
+def find_nearest_unvisited(visible_idx_list, visible_dist_list):
+    """Find the nearest unvisited point from visible list.
+
+    Args:
+        visible_idx_list: List of visible point indices (from visible_indices)
+        visible_dist_list: List of distances (from visible_distances), parallel to idx_list
+
+    Returns:
+        (index, distance) tuple for nearest unvisited point, or (None, None) if all visited
+    """
+    for idx, dist in zip(visible_idx_list, visible_dist_list):
+        if idx not in visited_points:
+            return idx, dist
+    return None, None
+
+
+def auto_travel_to_nearest_unvisited():
+    """Start travel to nearest unvisited visible point if one exists."""
+    global traveling, travel_target, travel_target_idx, travel_progress
+    global queued_target, queued_target_idx
+
+    nearest_idx, nearest_dist = find_nearest_unvisited(visible_indices, visible_distances)
+
+    if nearest_idx is not None:
+        if traveling:
+            # Queue the auto-travel target
+            queued_target_idx = nearest_idx
+            queued_target = points[nearest_idx]
+            print(f"Queued auto-travel to {get_name(nearest_idx)} ({format_dist(nearest_dist)})")
+        else:
+            # Start travel immediately
+            travel_target_idx = nearest_idx
+            travel_target = points[nearest_idx]
+            traveling = True
+            travel_progress = 0.0
+            print(f"Auto-traveling to {get_name(nearest_idx)} ({format_dist(nearest_dist)})")
+    else:
+        print("No unvisited points visible. Explore more!")
+
+
 # UI state
 list_scroll = 0
 visible_indices = []
@@ -284,6 +330,8 @@ while running:
                 elif event.key == pygame.K_SLASH or event.key == pygame.K_f:
                     search_active = True
                     search_text = ""
+                elif event.key == pygame.K_TAB:
+                    auto_travel_to_nearest_unvisited()
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
                 mx, my = event.pos
@@ -356,6 +404,12 @@ while running:
             camera_pos = orientation[0]
             pop_animation_idx = travel_target_idx
             pop_animation_start_time = pygame.time.get_ticks()
+
+            # Travel complete — mark as visited
+            if travel_target_idx is not None:
+                visited_points.add(travel_target_idx)
+                auto_travel_feedback = (f"Visited: {get_name(travel_target_idx)}", pygame.time.get_ticks())
+                print(f"Visited: {get_name(travel_target_idx)} ({len(visited_points)} total)")
 
             if queued_target is not None:
                 # Start queued travel
@@ -520,6 +574,16 @@ while running:
     pygame.draw.line(screen, CAMERA_COLOR, (center_x - crosshair_size, center_y), (center_x + crosshair_size, center_y), 2)
     pygame.draw.line(screen, CAMERA_COLOR, (center_x, center_y - crosshair_size), (center_x, center_y + crosshair_size), 2)
 
+    # Draw auto-travel feedback message
+    if auto_travel_feedback is not None:
+        msg, ts = auto_travel_feedback
+        elapsed_fb = pygame.time.get_ticks() - ts
+        if elapsed_fb > auto_travel_feedback_duration:
+            auto_travel_feedback = None
+        else:
+            feedback_surface = font.render(msg, True, (100, 255, 100))
+            screen.blit(feedback_surface, (10, 70))
+
     # Draw hover tooltip
     if hover_point is not None:
         hp2d, h_dist, h_idx = hover_point
@@ -580,10 +644,11 @@ while running:
     search_y = bm_y + 8
 
     # Count label
-    count_label = font.render(
-        f"POINTS ({len(filtered_indices)}/{len(visible_indices)})" if search_text else f"POINTS ({len(visible_indices)})",
-        True, TEXT_COLOR
-    )
+    if search_text:
+        count_str = f"POINTS ({len(filtered_indices)}/{len(visible_indices)}) | VISITED ({len(visited_points)})"
+    else:
+        count_str = f"POINTS ({len(visible_indices)}) | VISITED ({len(visited_points)})"
+    count_label = font.render(count_str, True, TEXT_COLOR)
     screen.blit(count_label, (SCREEN_WIDTH - 290, search_y))
     search_y += 16
 
@@ -614,8 +679,13 @@ while running:
         dist = filtered_distances[item_idx]
         name = get_name(point_idx)
 
-        # Highlight hovered
-        item_bg = LIST_ITEM_HOVER if hovered_item == item_idx else LIST_ITEM_BG
+        # Highlight hovered; dim visited
+        if hovered_item == item_idx:
+            item_bg = LIST_ITEM_HOVER
+        elif point_idx in visited_points:
+            item_bg = (50, 50, 70)
+        else:
+            item_bg = LIST_ITEM_BG
         pygame.draw.rect(screen, item_bg, (SCREEN_WIDTH - 290, y, 290, item_height))
 
         # Identicon from point name
@@ -645,7 +715,7 @@ while running:
 
     controls = [
         "WASD: Rotate camera | Q/E: Rotate 4D depth | Drag: Rotate camera",
-        "UP/DOWN: Scroll list | Click: Travel to point | V: Toggle view",
+        "UP/DOWN: Scroll list | Click: Travel | Tab: Auto-travel unvisited | V: Toggle view",
     ]
     for i, ctrl in enumerate(controls):
         ctrl_text = font.render(ctrl, True, (150, 150, 150))
