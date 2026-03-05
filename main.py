@@ -810,21 +810,21 @@ while running:
                 # Draw 3 blue triangles radially around the point
                 for arrow_idx in range(3):
                     angle = rotation_angle + (arrow_idx * 2 * np.pi / 3)
-                    center_x = p2d[0] + arrow_distance * np.cos(angle)
-                    center_y = p2d[1] + arrow_distance * np.sin(angle)
+                    tri_cx = p2d[0] + arrow_distance * np.cos(angle)
+                    tri_cy = p2d[1] + arrow_distance * np.sin(angle)
 
                     # Triangle points inward toward the target
                     # Tip points toward center of target
-                    tip_x = center_x - triangle_size * np.cos(angle)
-                    tip_y = center_y - triangle_size * np.sin(angle)
+                    tip_x = tri_cx - triangle_size * np.cos(angle)
+                    tip_y = tri_cy - triangle_size * np.sin(angle)
 
                     # Two base points perpendicular to the radial direction
                     perp_x = -np.sin(angle)
                     perp_y = np.cos(angle)
-                    base_left_x = center_x + perp_x * triangle_size * 0.7
-                    base_left_y = center_y + perp_y * triangle_size * 0.7
-                    base_right_x = center_x - perp_x * triangle_size * 0.7
-                    base_right_y = center_y - perp_y * triangle_size * 0.7
+                    base_left_x = tri_cx + perp_x * triangle_size * 0.7
+                    base_left_y = tri_cy + perp_y * triangle_size * 0.7
+                    base_right_x = tri_cx - perp_x * triangle_size * 0.7
+                    base_right_y = tri_cy - perp_y * triangle_size * 0.7
 
                     tri_verts = [
                         (int(tip_x), int(tip_y)),
@@ -834,8 +834,10 @@ while running:
                     pygame.draw.polygon(screen, (100, 150, 255), tri_verts)
                 break
 
-    # Draw player position dot at center of view area
-    pygame.draw.circle(screen, CAMERA_COLOR, (center_x, center_y), 3)
+    # Draw player position dot at center of view area (hide when parked at a point)
+    parked = not traveling and visible_distances and visible_distances[0] < ARRIVAL_THRESHOLD
+    if not parked:
+        pygame.draw.circle(screen, CAMERA_COLOR, (center_x, center_y), 3)
 
     # Draw auto-travel feedback message
     if auto_travel_feedback is not None:
