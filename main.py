@@ -142,6 +142,34 @@ view_mode = 0  # 0 = assigned colors, 1 = relative 4D position colors
 last_projected_points = []  # store for click detection
 dragging = False
 drag_start = None
+list_start_y = 100  # Y coordinate where point list items begin (updated each frame)
+
+# Bookmark system: list of (player_pos, orientation, name) tuples
+bookmarks = []
+
+
+def save_bookmark(name_str=None):
+    """Save current position and orientation as a bookmark."""
+    global bookmarks
+    if name_str is None:
+        name_str = f"Bookmark {len(bookmarks) + 1}"
+    bookmark = (player_pos.copy(), orientation.copy(), name_str)
+    bookmarks.append(bookmark)
+
+
+def restore_bookmark(bookmark_idx):
+    """Restore player position and orientation from a saved bookmark."""
+    global player_pos, orientation, camera_pos, traveling, travel_target, travel_target_idx
+    if 0 <= bookmark_idx < len(bookmarks):
+        pos, frame, name = bookmarks[bookmark_idx]
+        player_pos = pos.copy()
+        orientation = frame.copy()
+        camera_pos = orientation[0]
+        traveling = False
+        travel_target = None
+        travel_target_idx = None
+        update_visible()
+
 
 # Precompute visible points and distances
 def update_visible():
@@ -203,7 +231,7 @@ while running:
 
     # List scrolling
     item_height = 40
-    max_items = (SCREEN_HEIGHT - 100) // item_height
+    max_items = (SCREEN_HEIGHT - list_start_y) // item_height
     if keys[pygame.K_UP]:
         list_scroll = max(0, list_scroll - 1)
     if keys[pygame.K_DOWN]:
@@ -215,6 +243,10 @@ while running:
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_v:
                 view_mode = 1 - view_mode  # toggle 0/1
+            elif event.key == pygame.K_b:
+                save_bookmark()
+            elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
+                restore_bookmark(event.key - pygame.K_1)
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
                 mx, my = event.pos
@@ -230,7 +262,7 @@ while running:
                         # Resolve clicked point index
                         clicked_idx = None
                         if mx > SCREEN_WIDTH - 300:
-                            item_idx = (my - 100) // 40 + list_scroll
+                            item_idx = (my - list_start_y) // 40 + list_scroll
                             if 0 <= item_idx < len(visible_indices):
                                 clicked_idx = visible_indices[item_idx]
                         elif last_projected_points:
@@ -262,7 +294,7 @@ while running:
         elif event.type == pygame.MOUSEMOTION:
             mx, my = event.pos
             if not dragging and mx > SCREEN_WIDTH - 300:
-                item_idx = (my - 100) // 40 + list_scroll
+                item_idx = (my - list_start_y) // 40 + list_scroll
                 hovered_item = item_idx if 0 <= item_idx < len(visible_indices) else None
             elif dragging:
                 hovered_item = None
@@ -489,19 +521,36 @@ while running:
         screen, (100, 100, 100), (SCREEN_WIDTH - 300, 0), (SCREEN_WIDTH - 300, SCREEN_HEIGHT), 2
     )
 
-    # Draw list header
+    # Draw sidebar header
     header = font.render("Nearby Points (Distance)", True, TEXT_COLOR)
     screen.blit(header, (SCREEN_WIDTH - 290, 10))
 
+    # Draw bookmark section
+    bm_y = 35
+    pygame.draw.line(screen, (100, 100, 120), (SCREEN_WIDTH - 300, bm_y), (SCREEN_WIDTH, bm_y))
+    bm_label = font.render("BOOKMARKS  B=save  1-5=restore", True, (160, 160, 200))
+    screen.blit(bm_label, (SCREEN_WIDTH - 290, bm_y + 5))
+    bm_y += 24
+    for bm_i, (_, _, bm_name) in enumerate(bookmarks[:5]):
+        bm_rect = pygame.Rect(SCREEN_WIDTH - 290, bm_y, 280, 22)
+        pygame.draw.rect(screen, LIST_ITEM_BG, bm_rect)
+        bm_text = font.render(f"{bm_i + 1}: {bm_name}", True, TEXT_COLOR)
+        screen.blit(bm_text, (SCREEN_WIDTH - 283, bm_y + 5))
+        bm_y += 24
+    pygame.draw.line(screen, (100, 100, 120), (SCREEN_WIDTH - 300, bm_y + 4), (SCREEN_WIDTH, bm_y + 4))
+
+    global list_start_y
+    list_start_y = bm_y + 18
+
     # Draw list items
     item_height = 40
-    max_items = (SCREEN_HEIGHT - 100) // item_height
+    max_items = (SCREEN_HEIGHT - list_start_y) // item_height
     for i in range(max_items):
         item_idx = list_scroll + i
         if item_idx >= len(visible_indices):
             break
 
-        y = 100 + i * item_height
+        y = list_start_y + i * item_height
         point_idx = visible_indices[item_idx]
         dist = visible_distances[item_idx]
         name = get_name(point_idx)
