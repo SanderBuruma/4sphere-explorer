@@ -133,6 +133,24 @@ def get_identicon(idx):
         point_identicon_cache[idx] = identicon_with_margin
     return point_identicon_cache[idx]
 
+def draw_googly_eyes(surface, x, y, mouse_pos, scale=1):
+    """Draw googly eyes on top of an identicon at screen pos (x, y). scale=1 for 32px, scale=4 for 128px."""
+    eye_radius = 4 * scale
+    pupil_radius = 2 * scale
+    eye_y = y + 10 * scale
+    left_eye_x = x + 10 * scale
+    right_eye_x = x + 22 * scale
+    max_offset = eye_radius - pupil_radius
+
+    for ex in (left_eye_x, right_eye_x):
+        pygame.draw.circle(surface, (255, 255, 255), (ex, eye_y), eye_radius)
+        dx = mouse_pos[0] - ex
+        dy = mouse_pos[1] - eye_y
+        dist = max((dx * dx + dy * dy) ** 0.5, 0.001)
+        ox = int(dx / dist * max_offset)
+        oy = int(dy / dist * max_offset)
+        pygame.draw.circle(surface, (0, 0, 0), (ex + ox, eye_y + oy), pupil_radius)
+
 # Planet sprite loader
 planet_sprites = {}  # filename -> pygame.Surface
 
@@ -859,7 +877,9 @@ while running:
         pygame.draw.rect(screen, point_display_colors.get(h_idx, TEXT_COLOR), bg_rect, 1)
 
         # Draw identicon and label
-        screen.blit(identicon, (tx, ty + (tooltip_height - 32) // 2))
+        ident_y = ty + (tooltip_height - 32) // 2
+        screen.blit(identicon, (tx, ident_y))
+        draw_googly_eyes(screen, tx, ident_y, pygame.mouse.get_pos())
         screen.blit(label_surface, (tx + 32 + 4, ty + (tooltip_height - label_rect.height) // 2))
 
     # Draw radial menu
@@ -934,10 +954,12 @@ while running:
             # Measure panel size (including sprite area at top)
             line_height = 16
             padding = 8
-            sprite_size = 128
+            sprite_size = 64
+            identicon_size = 64
+            top_row_h = identicon_size
             max_w = max(font.size(line)[0] for line in lines)
-            panel_w = max(max_w + padding * 2, sprite_size + padding * 2)
-            panel_h = sprite_size + padding * 3 + len(lines) * line_height
+            panel_w = max(max_w + padding * 2, identicon_size + padding * 3 + sprite_size)
+            panel_h = top_row_h + padding * 3 + len(lines) * line_height
 
             # Position: offset right and above the anchor point
             px = panel_anchor[0] + 20
@@ -983,11 +1005,17 @@ while running:
                 sprite_display = pygame.Surface((sprite_size, sprite_size), pygame.SRCALPHA)
                 sprite_display.blit(rotated, rotated_rect)
 
-                sprite_x = (panel_w - sprite_size) // 2
+                sprite_x = identicon_size + padding * 2
                 panel_surf.blit(sprite_display, (sprite_x, padding))
 
-            # Draw text below sprite
-            text_y = sprite_size + padding * 2
+            # Draw large identicon in top-left with googly eyes
+            large_identicon = pygame.transform.scale(get_identicon(inspected_point_idx), (identicon_size, identicon_size))
+            ident_x = padding
+            ident_y = padding
+            panel_surf.blit(large_identicon, (ident_x, ident_y))
+
+            # Draw text below sprite/identicon area
+            text_y = top_row_h + padding * 2
             # Brighten panel_color for title readability (ensure min 150 per channel)
             title_color = tuple(min(255, c + 80) for c in panel_color)
             for li, line in enumerate(lines):
@@ -996,6 +1024,9 @@ while running:
                 panel_surf.blit(lbl, (padding, text_y + li * line_height))
 
             screen.blit(panel_surf, (px, py))
+
+            # Googly eyes on the large identicon
+            draw_googly_eyes(screen, px + padding, py + ident_y, pygame.mouse.get_pos(), scale=2)
         else:
             # Inspected point not visible — keep panel state but skip render
             pass
@@ -1074,6 +1105,7 @@ while running:
         # Identicon from point name
         identicon = get_identicon(point_idx)
         screen.blit(identicon, (SCREEN_WIDTH - 285, y + 4))
+        draw_googly_eyes(screen, SCREEN_WIDTH - 285, y + 4, pygame.mouse.get_pos())
 
         # Render name and distance with point's display color
         sidebar_color = point_display_colors.get(point_idx, point_colors[point_idx])
