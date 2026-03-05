@@ -658,15 +658,13 @@ while running:
                 w_factor = 0.5 + 0.5 * np.clip((rel[3] + 1.0) / 2.0, 0, 1)
                 base_color = (int(r * w_factor), int(g * w_factor), int(b * w_factor))
 
-            brightness_factor = 0.3 + normalized_dist * 0.7
-            color = tuple(int(c * brightness_factor) for c in base_color)
+            color = base_color
             point_display_colors[idx] = color
 
             # Glow halo behind point
             glow_radius = int(radius * 2.5 + normalized_dist * 8)
-            glow_alpha = int(30 + normalized_dist * 60)
             glow_surf = pygame.Surface((glow_radius * 2 + 4, glow_radius * 2 + 4), pygame.SRCALPHA)
-            pygame.draw.circle(glow_surf, (*color, glow_alpha), (glow_radius + 2, glow_radius + 2), glow_radius)
+            pygame.draw.circle(glow_surf, (*color, 60), (glow_radius + 2, glow_radius + 2), glow_radius)
             screen.blit(glow_surf, (int(p2d[0]) - glow_radius - 2, int(p2d[1]) - glow_radius - 2))
 
             # Try to render sprite; fall back to circle if sprite not available
