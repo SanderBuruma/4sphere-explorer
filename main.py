@@ -632,6 +632,9 @@ while running:
     hover_point = None
     hover_dist_sq_min = float("inf")
 
+    # Store computed display colors per point for reuse in tooltip/panel/sidebar
+    point_display_colors = {}
+
     for p2d, angular_dist, depth, idx in projected_points:
         if 0 <= p2d[0] < view_width and 0 <= p2d[1] < SCREEN_HEIGHT:
             # Size and brightness based on angular distance from camera
@@ -657,6 +660,7 @@ while running:
 
             brightness_factor = 0.3 + normalized_dist * 0.7
             color = tuple(int(c * brightness_factor) for c in base_color)
+            point_display_colors[idx] = color
 
             # Glow halo behind point
             glow_radius = int(radius * 2.5 + normalized_dist * 8)
@@ -677,7 +681,8 @@ while running:
             if idx == inspected_point_idx:
                 ring_radius = radius + 10
                 ring_surf = pygame.Surface((ring_radius * 2 + 4, ring_radius * 2 + 4), pygame.SRCALPHA)
-                pygame.draw.circle(ring_surf, (255, 200, 50, 160), (ring_radius + 2, ring_radius + 2), ring_radius, 2)
+                ring_color = (*color, 160)
+                pygame.draw.circle(ring_surf, ring_color, (ring_radius + 2, ring_radius + 2), ring_radius, 2)
                 screen.blit(ring_surf, (int(p2d[0]) - ring_radius - 2, int(p2d[1]) - ring_radius - 2))
 
             # Check if mouse is near this point (within radius + margin)
@@ -861,9 +866,7 @@ while running:
         padding = 4
         bg_rect = pygame.Rect(tx - padding, ty - padding, tooltip_width + padding * 2, tooltip_height + padding * 2)
         pygame.draw.rect(screen, (30, 30, 50), bg_rect)
-        # Use distance-based color gradient to match detail panel
-        tooltip_border_color = distance_to_color(h_dist)
-        pygame.draw.rect(screen, tooltip_border_color, bg_rect, 1)
+        pygame.draw.rect(screen, point_display_colors.get(h_idx, TEXT_COLOR), bg_rect, 1)
 
         # Draw identicon and label
         screen.blit(identicon, (tx, ty + (tooltip_height - 32) // 2))
@@ -946,15 +949,16 @@ while running:
 
             panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
             pygame.draw.rect(panel_surf, (20, 20, 40, 200), (0, 0, panel_w, panel_h), border_radius=4)
-            pygame.draw.rect(panel_surf, (255, 200, 50, 120), (0, 0, panel_w, panel_h), 1, border_radius=4)
+            panel_color = point_display_colors.get(inspected_point_idx, point_colors[inspected_point_idx])
+            pygame.draw.rect(panel_surf, (*panel_color, 120), (0, 0, panel_w, panel_h), 1, border_radius=4)
 
             # Draw large sprite at top of panel
             sprite = get_planet_sprite(inspected_point_idx)
             if sprite is not None:
                 scaled_sprite = pygame.transform.scale(sprite, (sprite_size, sprite_size))
 
-                # Use distance-based color gradient (same as sidebar)
-                point_color = distance_to_color(panel_dist)
+                # Use same color as 3D view (hue from point, brightness from distance)
+                point_color = point_display_colors.get(inspected_point_idx, point_colors[inspected_point_idx])
 
                 # Colorize sprite
                 colorized = scaled_sprite.copy()
@@ -983,9 +987,11 @@ while running:
 
             # Draw text below sprite
             text_y = sprite_size + padding * 2
+            # Brighten panel_color for title readability (ensure min 150 per channel)
+            title_color = tuple(min(255, c + 80) for c in panel_color)
             for li, line in enumerate(lines):
-                color = (255, 200, 50) if li == 0 else TEXT_COLOR
-                lbl = font.render(line, True, color)
+                text_color = title_color if li == 0 else TEXT_COLOR
+                lbl = font.render(line, True, text_color)
                 panel_surf.blit(lbl, (padding, text_y + li * line_height))
 
             screen.blit(panel_surf, (px, py))
@@ -1068,10 +1074,10 @@ while running:
         identicon = get_identicon(point_idx)
         screen.blit(identicon, (SCREEN_WIDTH - 285, y + 4))
 
-        # Render name and distance separately with distance colored by gradient
-        name_text = font.render(name, True, TEXT_COLOR)
-        dist_color = distance_to_color(dist)
-        dist_text = font.render(f"({format_dist(dist)})", True, dist_color)
+        # Render name and distance with point's display color
+        sidebar_color = point_display_colors.get(point_idx, point_colors[point_idx])
+        name_text = font.render(name, True, sidebar_color)
+        dist_text = font.render(f"({format_dist(dist)})", True, sidebar_color)
         x_offset = SCREEN_WIDTH - 250
         screen.blit(name_text, (x_offset, y + 12))
         x_offset += name_text.get_width() + 4
