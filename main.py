@@ -144,6 +144,25 @@ dragging = False
 drag_start = None
 list_start_y = 100  # Y coordinate where point list items begin (updated each frame)
 
+# Search/filter state
+search_text = ""
+search_active = False
+
+
+def apply_search_filter(search_query):
+    """Filter visible_indices by name prefix match.
+
+    Args:
+        search_query: String to match against point names (case-insensitive prefix)
+
+    Returns:
+        List of indices from visible_indices whose names start with search_query
+    """
+    if not search_query:
+        return visible_indices[:]
+    query_lower = search_query.lower()
+    return [idx for idx in visible_indices if get_name(idx).lower().startswith(query_lower)]
+
 # Bookmark system: list of (player_pos, orientation, name) tuples
 bookmarks = []
 
@@ -229,24 +248,42 @@ while running:
     update_visible()
     update_audio(visible_indices, visible_distances, _name_keys)
 
+    # Compute filtered list once per frame (used by event handlers and renderer)
+    filtered_indices = apply_search_filter(search_text)
+    vis_dist_map = {idx: dist for idx, dist in zip(visible_indices, visible_distances)}
+    filtered_distances = [vis_dist_map[idx] for idx in filtered_indices]
+
     # List scrolling
     item_height = 40
     max_items = (SCREEN_HEIGHT - list_start_y) // item_height
     if keys[pygame.K_UP]:
         list_scroll = max(0, list_scroll - 1)
     if keys[pygame.K_DOWN]:
-        list_scroll = min(max(0, len(visible_indices) - max_items), list_scroll + 1)
+        list_scroll = min(max(0, len(filtered_indices) - max_items), list_scroll + 1)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_v:
-                view_mode = 1 - view_mode  # toggle 0/1
-            elif event.key == pygame.K_b:
-                save_bookmark()
-            elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
-                restore_bookmark(event.key - pygame.K_1)
+            if search_active:
+                if event.key == pygame.K_ESCAPE:
+                    search_text = ""
+                    search_active = False
+                elif event.key == pygame.K_BACKSPACE:
+                    search_text = search_text[:-1]
+                elif event.unicode and (event.unicode.isalnum() or event.unicode in " -"):
+                    search_text += event.unicode
+                # Allow UP/DOWN to scroll list even while searching (fall through handled by keys[] above)
+            else:
+                if event.key == pygame.K_v:
+                    view_mode = 1 - view_mode  # toggle 0/1
+                elif event.key == pygame.K_b:
+                    save_bookmark()
+                elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
+                    restore_bookmark(event.key - pygame.K_1)
+                elif event.key == pygame.K_SLASH or event.key == pygame.K_f:
+                    search_active = True
+                    search_text = ""
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
                 mx, my = event.pos
@@ -263,8 +300,8 @@ while running:
                         clicked_idx = None
                         if mx > SCREEN_WIDTH - 300:
                             item_idx = (my - list_start_y) // 40 + list_scroll
-                            if 0 <= item_idx < len(visible_indices):
-                                clicked_idx = visible_indices[item_idx]
+                            if 0 <= item_idx < len(filtered_indices):
+                                clicked_idx = filtered_indices[item_idx]
                         elif last_projected_points:
                             best_dist_sq = float("inf")
                             best_idx = None
@@ -295,7 +332,7 @@ while running:
             mx, my = event.pos
             if not dragging and mx > SCREEN_WIDTH - 300:
                 item_idx = (my - list_start_y) // 40 + list_scroll
-                hovered_item = item_idx if 0 <= item_idx < len(visible_indices) else None
+                hovered_item = item_idx if 0 <= item_idx < len(filtered_indices) else None
             elif dragging:
                 hovered_item = None
 
@@ -397,8 +434,8 @@ while running:
                 hover_point = (p2d, angular_dist, idx)
 
     # Draw white circle around hovered list item point
-    if hovered_item is not None and 0 <= hovered_item < len(visible_indices):
-        hovered_point_idx = visible_indices[hovered_item]
+    if hovered_item is not None and 0 <= hovered_item < len(filtered_indices):
+        hovered_point_idx = filtered_indices[hovered_item]
         for p2d, angular_dist, depth, idx in projected_points:
             if idx == hovered_point_idx:
                 # Draw 50% transparent white circle outline around the point
@@ -539,22 +576,43 @@ while running:
         bm_y += 24
     pygame.draw.line(screen, (100, 100, 120), (SCREEN_WIDTH - 300, bm_y + 4), (SCREEN_WIDTH, bm_y + 4))
 
-    global list_start_y
-    list_start_y = bm_y + 18
+    # Search field and list header (between bookmark divider and point list)
+    search_y = bm_y + 8
+
+    # Count label
+    count_label = font.render(
+        f"POINTS ({len(filtered_indices)}/{len(visible_indices)})" if search_text else f"POINTS ({len(visible_indices)})",
+        True, TEXT_COLOR
+    )
+    screen.blit(count_label, (SCREEN_WIDTH - 290, search_y))
+    search_y += 16
+
+    # Search field
+    search_field_rect = pygame.Rect(SCREEN_WIDTH - 290, search_y, 280, 22)
+    if search_active:
+        pygame.draw.rect(screen, (40, 70, 90), search_field_rect)
+        pygame.draw.rect(screen, (100, 200, 255), search_field_rect, 1)
+    else:
+        pygame.draw.rect(screen, LIST_ITEM_BG, search_field_rect)
+        pygame.draw.rect(screen, (100, 100, 100), search_field_rect, 1)
+    display_query = search_text + ("|" if search_active else "")
+    search_label = font.render(f"/{display_query}", True, TEXT_COLOR if search_active else (130, 130, 130))
+    screen.blit(search_label, (SCREEN_WIDTH - 285, search_y + 5))
+
+    list_start_y = search_y + 28
 
     # Draw list items
     item_height = 40
     max_items = (SCREEN_HEIGHT - list_start_y) // item_height
     for i in range(max_items):
         item_idx = list_scroll + i
-        if item_idx >= len(visible_indices):
+        if item_idx >= len(filtered_indices):
             break
 
         y = list_start_y + i * item_height
-        point_idx = visible_indices[item_idx]
-        dist = visible_distances[item_idx]
+        point_idx = filtered_indices[item_idx]
+        dist = filtered_distances[item_idx]
         name = get_name(point_idx)
-        label = f"{name} ({dist:.2f})"
 
         # Highlight hovered
         item_bg = LIST_ITEM_HOVER if hovered_item == item_idx else LIST_ITEM_BG
