@@ -209,8 +209,6 @@ visible_distances = []
 hovered_item = None
 view_mode = 0  # 0 = assigned colors, 1 = relative 4D position colors
 last_projected_points = []  # store for click detection
-dragging = False
-drag_start = None
 list_start_y = 100  # Y coordinate where point list items begin (updated each frame)
 
 # Search/filter state
@@ -302,16 +300,6 @@ while running:
     if keys[pygame.K_e]:  # rotate in 4D depth (opposite)
         rotate_frame(orientation, 3, -rotation_speed)
 
-    # Handle drag rotation
-    if dragging and drag_start is not None:
-        mx, my = pygame.mouse.get_pos()
-        dx = (mx - drag_start[0]) * 0.005
-        dy = (my - drag_start[1]) * 0.005
-        if abs(dx) > 1e-6:
-            rotate_frame(orientation, 1, dx)
-        if abs(dy) > 1e-6:
-            rotate_frame(orientation, 2, dy)
-
     reorthogonalize_frame(orientation)
     camera_pos = orientation[0]
     update_visible()
@@ -370,8 +358,6 @@ while running:
                     # Simple dismiss: any new click clears the panel
                     # (unless it leads to a new inspection via radial menu)
                     inspected_point_idx = None
-                dragging = True
-                drag_start = (mx, my)
                 # Check if click is on a viewport point for potential radial menu
                 if mx <= SCREEN_WIDTH - 300 and last_projected_points:
                     best_dist_sq = float("inf")
@@ -409,81 +395,72 @@ while running:
                 elif menu_state == "hold_pending":
                     # Released before threshold — treat as normal click
                     menu_state = "idle"
-                    if dragging and drag_start is not None:
-                        drag_dist_sq = (mx - drag_start[0]) ** 2 + (my - drag_start[1]) ** 2
-                        if drag_dist_sq < 100:
-                            clicked_idx = None
-                            if mx > SCREEN_WIDTH - 300:
-                                item_idx = (my - list_start_y) // 40 + list_scroll
-                                if 0 <= item_idx < len(filtered_indices):
-                                    clicked_idx = filtered_indices[item_idx]
-                            elif last_projected_points:
-                                best_dist_sq = float("inf")
-                                best_idx = None
-                                for p2d, ang, dep, idx in last_projected_points:
-                                    dx, dy = mx - p2d[0], my - p2d[1]
-                                    d_sq = dx * dx + dy * dy
-                                    if d_sq < best_dist_sq:
-                                        best_dist_sq = d_sq
-                                        best_idx = idx
-                                if best_idx is not None and best_dist_sq < 400:
-                                    clicked_idx = best_idx
-                            if clicked_idx is not None:
-                                if traveling:
-                                    queued_target_idx = clicked_idx
-                                    queued_target = points[clicked_idx]
-                                else:
-                                    travel_target_idx = clicked_idx
-                                    travel_target = points[clicked_idx]
-                                    traveling = True
-                                    travel_progress = 0.0
-                                    pop_animation_idx = None
-                                    pop_animation_start_time = None
+                    clicked_idx = None
+                    if mx > SCREEN_WIDTH - 300:
+                        item_idx = (my - list_start_y) // 40 + list_scroll
+                        if 0 <= item_idx < len(filtered_indices):
+                            clicked_idx = filtered_indices[item_idx]
+                    elif last_projected_points:
+                        best_dist_sq = float("inf")
+                        best_idx = None
+                        for p2d, ang, dep, idx in last_projected_points:
+                            dx, dy = mx - p2d[0], my - p2d[1]
+                            d_sq = dx * dx + dy * dy
+                            if d_sq < best_dist_sq:
+                                best_dist_sq = d_sq
+                                best_idx = idx
+                        if best_idx is not None and best_dist_sq < 400:
+                            clicked_idx = best_idx
+                    if clicked_idx is not None:
+                        if traveling:
+                            queued_target_idx = clicked_idx
+                            queued_target = points[clicked_idx]
+                        else:
+                            travel_target_idx = clicked_idx
+                            travel_target = points[clicked_idx]
+                            traveling = True
+                            travel_progress = 0.0
+                            pop_animation_idx = None
+                            pop_animation_start_time = None
                     menu_point_idx = None
                     menu_center = None
                 else:
-                    # Normal release (no menu involved) — existing behavior
-                    if dragging and drag_start is not None:
-                        drag_dist_sq = (mx - drag_start[0]) ** 2 + (my - drag_start[1]) ** 2
-                        if drag_dist_sq < 100:  # within 10px threshold
-                            # Resolve clicked point index
-                            clicked_idx = None
-                            if mx > SCREEN_WIDTH - 300:
-                                item_idx = (my - list_start_y) // 40 + list_scroll
-                                if 0 <= item_idx < len(filtered_indices):
-                                    clicked_idx = filtered_indices[item_idx]
-                            elif last_projected_points:
-                                best_dist_sq = float("inf")
-                                best_idx = None
-                                for p2d, ang, dep, idx in last_projected_points:
-                                    dx, dy = mx - p2d[0], my - p2d[1]
-                                    d_sq = dx * dx + dy * dy
-                                    if d_sq < best_dist_sq:
-                                        best_dist_sq = d_sq
-                                        best_idx = idx
-                                if best_idx is not None and best_dist_sq < 400:
-                                    clicked_idx = best_idx
+                    # Normal release (no menu involved) — resolve clicked point index
+                    clicked_idx = None
+                    if mx > SCREEN_WIDTH - 300:
+                        item_idx = (my - list_start_y) // 40 + list_scroll
+                        if 0 <= item_idx < len(filtered_indices):
+                            clicked_idx = filtered_indices[item_idx]
+                    elif last_projected_points:
+                        best_dist_sq = float("inf")
+                        best_idx = None
+                        for p2d, ang, dep, idx in last_projected_points:
+                            dx, dy = mx - p2d[0], my - p2d[1]
+                            d_sq = dx * dx + dy * dy
+                            if d_sq < best_dist_sq:
+                                best_dist_sq = d_sq
+                                best_idx = idx
+                        if best_idx is not None and best_dist_sq < 400:
+                            clicked_idx = best_idx
 
-                            if clicked_idx is not None:
-                                if traveling:
-                                    # Queue — will start after current travel completes
-                                    queued_target_idx = clicked_idx
-                                    queued_target = points[clicked_idx]
-                                else:
-                                    travel_target_idx = clicked_idx
-                                    travel_target = points[clicked_idx]
-                                    traveling = True
-                                    travel_progress = 0.0
-                                    pop_animation_idx = None
-                                    pop_animation_start_time = None
-                dragging = False
-                drag_start = None
+                    if clicked_idx is not None:
+                        if traveling:
+                            # Queue — will start after current travel completes
+                            queued_target_idx = clicked_idx
+                            queued_target = points[clicked_idx]
+                        else:
+                            travel_target_idx = clicked_idx
+                            travel_target = points[clicked_idx]
+                            traveling = True
+                            travel_progress = 0.0
+                            pop_animation_idx = None
+                            pop_animation_start_time = None
         elif event.type == pygame.MOUSEMOTION:
             mx, my = event.pos
-            if not dragging and mx > SCREEN_WIDTH - 300:
+            if mx > SCREEN_WIDTH - 300:
                 item_idx = (my - list_start_y) // 40 + list_scroll
                 hovered_item = item_idx if 0 <= item_idx < len(filtered_indices) else None
-            elif dragging:
+            else:
                 hovered_item = None
 
     # Check hold threshold for radial menu
