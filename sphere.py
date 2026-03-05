@@ -1,5 +1,6 @@
 import numpy as np
 import colorsys
+from scipy.spatial import KDTree
 
 
 SYLLABLES_CORE = [
@@ -109,6 +110,53 @@ def slerp(p1, p2, t):
         return p1 + t * (p2 - p1)
     sin_angle = np.sin(angle)
     return (np.sin((1 - t) * angle) / sin_angle) * p1 + (np.sin(t * angle) / sin_angle) * p2
+
+
+def build_visibility_kdtree(points):
+    """Build a KDTree index on points for fast spatial queries.
+
+    Returns KDTree object for use in query_visible_kdtree().
+    """
+    return KDTree(points)
+
+
+def query_visible_kdtree(kdtree, camera_pos, points, fov_angle):
+    """Query visible points using KDTree and angular FOV constraint.
+
+    Uses KDTree radius search in 4D space, then filters by dot-product
+    (angular distance) to enforce FOV cone. Returns indices and coordinates
+    of visible points.
+
+    Args:
+        kdtree: Precomputed KDTree(points)
+        camera_pos: Camera position on S³ (unit 4D vector)
+        points: Original point array (for filtering, returned visible subset)
+        fov_angle: Field-of-view angle in radians
+
+    Returns:
+        (visible_points_array, indices_array) matching visible_points() signature
+    """
+    # FOV constraint: cos(fov_angle) bounds the dot product
+    cos_fov = np.cos(fov_angle)
+
+    # Euclidean radius in 4D corresponding to angular FOV
+    # For points p on unit sphere with camera c, angular distance θ relates to
+    # Euclidean via: ||p - c||² = 2(1 - cos(θ))
+    # Max Euclidean distance for visible points:
+    max_euclidean = np.sqrt(2 * (1 - cos_fov))
+
+    # Query KDTree for all points within Euclidean radius
+    indices = kdtree.query_ball_point(camera_pos, max_euclidean)
+
+    if len(indices) == 0:
+        return points[np.array([], dtype=int)], np.array([], dtype=int)
+
+    # Filter by angular FOV constraint (dot product > cos_fov)
+    dots = np.dot(points[indices], camera_pos)
+    angular_visible = dots > cos_fov
+    filtered_indices = np.array(indices)[angular_visible]
+
+    return points[filtered_indices], filtered_indices
 
 
 def visible_points(camera_pos, points, fov_angle=np.pi / 2):
