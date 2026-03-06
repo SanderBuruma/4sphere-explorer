@@ -329,33 +329,6 @@ def apply_search_filter(search_query):
     query_lower = search_query.lower()
     return [idx for idx in visible_indices if get_name(idx).lower().startswith(query_lower)]
 
-# Bookmark system: list of (player_pos, orientation, name) tuples
-bookmarks = []
-
-
-def save_bookmark(name_str=None):
-    """Save current position and orientation as a bookmark."""
-    global bookmarks
-    if name_str is None:
-        name_str = f"Bookmark {len(bookmarks) + 1}"
-    bookmark = (player_pos.copy(), orientation.copy(), name_str)
-    bookmarks.append(bookmark)
-
-
-def restore_bookmark(bookmark_idx):
-    """Restore player position and orientation from a saved bookmark."""
-    global player_pos, orientation, camera_pos, traveling, travel_target, travel_target_idx
-    if 0 <= bookmark_idx < len(bookmarks):
-        pos, frame, name = bookmarks[bookmark_idx]
-        player_pos = pos.copy()
-        orientation = frame.copy()
-        camera_pos = orientation[0]
-        traveling = False
-        travel_target = None
-        travel_target_idx = None
-        update_visible()
-
-
 # Precompute visible points and distances
 def update_visible():
     global visible_indices, visible_distances, point_identicon_cache
@@ -441,10 +414,6 @@ while running:
                         menu_center = None
                 elif event.key == pygame.K_v:
                     view_mode = 1 - view_mode  # toggle 0/1
-                elif event.key == pygame.K_b:
-                    save_bookmark()
-                elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
-                    restore_bookmark(event.key - pygame.K_1)
                 elif event.key == pygame.K_SLASH or event.key == pygame.K_f:
                     search_active = True
                     search_text = ""
@@ -1042,22 +1011,8 @@ while running:
     header = font.render("Nearby Points (Distance)", True, TEXT_COLOR)
     screen.blit(header, (SCREEN_WIDTH - 290, 10))
 
-    # Draw bookmark section
-    bm_y = 35
-    pygame.draw.line(screen, (100, 100, 120), (SCREEN_WIDTH - 300, bm_y), (SCREEN_WIDTH, bm_y))
-    bm_label = font.render("BOOKMARKS  B=save  1-5=restore", True, (160, 160, 200))
-    screen.blit(bm_label, (SCREEN_WIDTH - 290, bm_y + 5))
-    bm_y += 24
-    for bm_i, (_, _, bm_name) in enumerate(bookmarks[:5]):
-        bm_rect = pygame.Rect(SCREEN_WIDTH - 290, bm_y, 280, 22)
-        pygame.draw.rect(screen, LIST_ITEM_BG, bm_rect)
-        bm_text = font.render(f"{bm_i + 1}: {bm_name}", True, TEXT_COLOR)
-        screen.blit(bm_text, (SCREEN_WIDTH - 283, bm_y + 5))
-        bm_y += 24
-    pygame.draw.line(screen, (100, 100, 120), (SCREEN_WIDTH - 300, bm_y + 4), (SCREEN_WIDTH, bm_y + 4))
-
-    # Search field and list header (between bookmark divider and point list)
-    search_y = bm_y + 8
+    # Search field and list header
+    search_y = 35
 
     # Count label
     if search_text:
