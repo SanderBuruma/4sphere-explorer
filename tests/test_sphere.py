@@ -8,11 +8,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sphere import (
     angular_distance,
+    build_player_frame,
     build_visibility_kdtree,
     decode_name,
     project_to_tangent,
     query_visible_kdtree,
     random_point_on_s3,
+    reorthogonalize_frame,
+    rotate_frame,
+    rotate_frame_tangent,
     slerp,
     tangent_basis,
     visible_points,
@@ -21,6 +25,7 @@ from sphere import (
     _N_CORE,
     _N_END,
     _N_SUF,
+    w_to_color,
 )
 
 NUM_POINTS = 30_000
@@ -454,6 +459,335 @@ class TestTangentProjection(unittest.TestCase):
             brute_set = set(brute_idx.tolist())
             kd_set = set(kd_idx.tolist())
             self.assertEqual(brute_set, kd_set)
+
+
+class TestPlayerFrameProjection(unittest.TestCase):
+    """Test that player projects to screen center in XYZ projection mode."""
+
+    CAMERA_OFFSET = 0.08  # matches main.py
+
+    def _make_orientation(self, cam):
+        """Build a 4x4 orientation frame from camera position."""
+        frame = np.zeros((4, 4))
+        frame[0] = cam / np.linalg.norm(cam)
+        # Use tangent_basis for rows 1-3
+        basis = tangent_basis(frame[0])
+        for i in range(3):
+            frame[i + 1] = basis[i]
+        return frame
+
+    def _simulate_player_camera(self, player_pos):
+        """Given player pos, create camera offset along an arbitrary tangent direction."""
+        player_pos = player_pos / np.linalg.norm(player_pos)
+        basis = tangent_basis(player_pos)
+        # Camera is offset from player along first tangent direction
+        cam = slerp(player_pos, basis[0] + player_pos, self.CAMERA_OFFSET / np.pi)
+        cam /= np.linalg.norm(cam)
+        return cam
+
+    def test_player_projects_to_origin_from_standard_positions(self):
+        """Player position must have near-zero components 1,2,3 in its own frame."""
+        positions = [
+            np.array([1.0, 0.0, 0.0, 0.0]),
+            np.array([0.0, 1.0, 0.0, 0.0]),
+            np.array([0.0, 0.0, 1.0, 0.0]),
+            np.array([0.0, 0.0, 0.0, 1.0]),
+            np.array([0.5, 0.5, 0.5, 0.5]),
+            np.array([-0.3, 0.7, -0.2, 0.6]),
+        ]
+        for pos in positions:
+            pos = pos / np.linalg.norm(pos)
+            cam = self._simulate_player_camera(pos)
+            orientation = self._make_orientation(cam)
+            frame = build_player_frame(pos, orientation)
+
+            # Project player through frame
+            proj = pos @ frame.T
+            # Component 0 should be ~1 (aligned with self), components 1,2,3 should be ~0
+            self.assertAlmostEqual(proj[0], 1.0, places=5,
+                msg=f"Player {pos}: component 0 = {proj[0]:.6f}, expected ~1.0")
+            for c in range(1, 4):
+                self.assertAlmostEqual(proj[c], 0.0, places=5,
+                    msg=f"Player {pos}: component {c} = {proj[c]:.6f}, expected ~0.0")
+
+    def test_player_projects_to_origin_from_random_orientations(self):
+        """Player maps to (1,0,0,0) in its frame from 50 random positions+orientations."""
+        rng = np.random.default_rng(99)
+        for _ in range(50):
+            player = rng.standard_normal(4)
+            player /= np.linalg.norm(player)
+            cam = self._simulate_player_camera(player)
+            orientation = self._make_orientation(cam)
+
+            # Simulate rotations to get a non-trivial orientation
+            for _ in range(rng.integers(1, 10)):
+                axis = rng.integers(1, 4)
+                angle = rng.uniform(-0.5, 0.5)
+                rotate_frame(orientation, axis, angle)
+            reorthogonalize_frame(orientation)
+
+            frame = build_player_frame(player, orientation)
+            proj = player @ frame.T
+            self.assertAlmostEqual(proj[0], 1.0, places=4,
+                msg=f"Component 0 = {proj[0]:.6f}")
+            for c in range(1, 4):
+                self.assertAlmostEqual(proj[c], 0.0, places=4,
+                    msg=f"Component {c} = {proj[c]:.6f}")
+
+    def test_frame_is_orthonormal(self):
+        """Player frame must be orthonormal (4x4 orthogonal matrix)."""
+        rng = np.random.default_rng(100)
+        for _ in range(30):
+            player = rng.standard_normal(4)
+            player /= np.linalg.norm(player)
+            cam = self._simulate_player_camera(player)
+            orientation = self._make_orientation(cam)
+            frame = build_player_frame(player, orientation)
+
+            # Check orthonormality: frame @ frame.T should be identity
+            product = frame @ frame.T
+            np.testing.assert_allclose(product, np.eye(4), atol=1e-10,
+                err_msg=f"Frame not orthonormal for player {player}")
+
+    def test_nearby_points_project_near_center(self):
+        """Points close to player should have small components 1,2,3."""
+        rng = np.random.default_rng(101)
+        for _ in range(20):
+            player = rng.standard_normal(4)
+            player /= np.linalg.norm(player)
+            cam = self._simulate_player_camera(player)
+            orientation = self._make_orientation(cam)
+            frame = build_player_frame(player, orientation)
+
+            # Generate a nearby point (small angular distance)
+            tangent = rng.standard_normal(4)
+            tangent -= np.dot(tangent, player) * player
+            tangent /= np.linalg.norm(tangent)
+            nearby = slerp(player, tangent + player, 0.01)  # ~0.01 rad away
+            nearby /= np.linalg.norm(nearby)
+
+            proj = nearby @ frame.T
+            # Components 1,2,3 should be small (point is close)
+            offset = np.sqrt(proj[1]**2 + proj[2]**2 + proj[3]**2)
+            self.assertLess(offset, 0.1,
+                msg=f"Nearby point offset {offset:.4f} too large")
+
+
+class TestXYZProjectionColors(unittest.TestCase):
+    """Test w_to_color gradient: blue(-1) → white(0) → red(+1)."""
+
+    def test_w_minus1_is_blue(self):
+        """w=-1 gives pure blue (0, 0, 255)."""
+        self.assertEqual(w_to_color(-1.0), (0, 0, 255))
+
+    def test_w_zero_is_white(self):
+        """w=0 gives white (255, 255, 255)."""
+        self.assertEqual(w_to_color(0.0), (255, 255, 255))
+
+    def test_w_plus1_is_red(self):
+        """w=+1 gives pure red (255, 0, 0)."""
+        self.assertEqual(w_to_color(1.0), (255, 0, 0))
+
+    def test_w_minus05_between_blue_and_white(self):
+        """w=-0.5 is halfway between blue and white."""
+        r, g, b = w_to_color(-0.5)
+        # R and G should be ~127, B should be 255
+        self.assertAlmostEqual(r, 127, delta=1)
+        self.assertAlmostEqual(g, 127, delta=1)
+        self.assertEqual(b, 255)
+
+    def test_w_plus05_between_white_and_red(self):
+        """w=+0.5 is halfway between white and red."""
+        r, g, b = w_to_color(0.5)
+        # R should be 255, G and B should be ~127
+        self.assertEqual(r, 255)
+        self.assertAlmostEqual(g, 127, delta=1)
+        self.assertAlmostEqual(b, 127, delta=1)
+
+    def test_r_channel_monotonically_nondecreasing(self):
+        """R channel is monotonically non-decreasing as w goes from -1 to +1."""
+        ws = [i / 100.0 for i in range(-100, 101)]
+        rs = [w_to_color(w)[0] for w in ws]
+        for i in range(1, len(rs)):
+            self.assertGreaterEqual(rs[i], rs[i - 1],
+                f"R decreased at w={ws[i]:.2f}: {rs[i]} < {rs[i-1]}")
+
+    def test_b_channel_monotonically_nonincreasing(self):
+        """B channel is monotonically non-increasing as w goes from -1 to +1."""
+        ws = [i / 100.0 for i in range(-100, 101)]
+        bs = [w_to_color(w)[2] for w in ws]
+        for i in range(1, len(bs)):
+            self.assertLessEqual(bs[i], bs[i - 1],
+                f"B increased at w={ws[i]:.2f}: {bs[i]} > {bs[i-1]}")
+
+
+class TestRotateFrameTangent(unittest.TestCase):
+    """Test rotate_frame_tangent: rotates tangent basis without moving camera."""
+
+    def _make_frame(self, cam):
+        frame = np.eye(4)
+        frame[0] = cam / np.linalg.norm(cam)
+        basis = tangent_basis(frame[0])
+        for i in range(3):
+            frame[i + 1] = basis[i]
+        return frame
+
+    def test_row0_unchanged(self):
+        """Row 0 (camera) must be identical before and after tangent rotation."""
+        rng = np.random.default_rng(200)
+        for _ in range(20):
+            cam = rng.standard_normal(4)
+            cam /= np.linalg.norm(cam)
+            frame = self._make_frame(cam)
+            row0_before = frame[0].copy()
+            axis1, axis2 = rng.choice([1, 2, 3], 2, replace=False)
+            angle = rng.uniform(-1.0, 1.0)
+            rotate_frame_tangent(frame, axis1, axis2, angle)
+            np.testing.assert_allclose(frame[0], row0_before, atol=1e-14,
+                err_msg="Row 0 changed after tangent rotation")
+
+    def test_orthonormality_preserved(self):
+        """Frame remains orthonormal after tangent rotation."""
+        rng = np.random.default_rng(201)
+        for _ in range(20):
+            cam = rng.standard_normal(4)
+            cam /= np.linalg.norm(cam)
+            frame = self._make_frame(cam)
+            axis1, axis2 = rng.choice([1, 2, 3], 2, replace=False)
+            angle = rng.uniform(-1.0, 1.0)
+            rotate_frame_tangent(frame, axis1, axis2, angle)
+            product = frame @ frame.T
+            np.testing.assert_allclose(product, np.eye(4), atol=1e-10,
+                err_msg="Frame not orthonormal after tangent rotation")
+
+    def test_rotation_angle_matches(self):
+        """Angle between original and rotated axis vectors matches input angle."""
+        rng = np.random.default_rng(202)
+        for _ in range(20):
+            cam = rng.standard_normal(4)
+            cam /= np.linalg.norm(cam)
+            frame = self._make_frame(cam)
+            axis1, axis2 = rng.choice([1, 2, 3], 2, replace=False)
+            angle = rng.uniform(-0.5, 0.5)
+            v1_before = frame[axis1].copy()
+            rotate_frame_tangent(frame, axis1, axis2, angle)
+            # The rotated v1 should make angle `angle` with original v1
+            dot = np.clip(np.dot(frame[axis1], v1_before), -1.0, 1.0)
+            measured = np.arccos(dot)
+            self.assertAlmostEqual(measured, abs(angle), places=10,
+                msg=f"Expected angle {abs(angle):.6f}, got {measured:.6f}")
+
+
+class TestFixedYFrame(unittest.TestCase):
+    """Test XYZ Fixed-Y mode: absolute Y axis [0,1,0,0] stays as frame row 2."""
+
+    FIXED_UP = np.array([0.0, 1.0, 0.0, 0.0])
+
+    def _make_frame(self, cam):
+        frame = np.eye(4)
+        frame[0] = cam / np.linalg.norm(cam)
+        basis = tangent_basis(frame[0])
+        for i in range(3):
+            frame[i + 1] = basis[i]
+        return frame
+
+    def _apply_fixed_up_override(self, player_frame, orientation):
+        """Reproduce the mode 3 frame override from main.py using absolute Y."""
+        up = self.FIXED_UP.copy()
+        up -= np.dot(up, player_frame[0]) * player_frame[0]
+        up_norm = np.linalg.norm(up)
+        if up_norm < 1e-8:
+            return False
+        up /= up_norm
+        player_frame[2] = up
+        v3 = orientation[3].copy()
+        v3 -= np.dot(v3, player_frame[0]) * player_frame[0]
+        v3 -= np.dot(v3, player_frame[2]) * player_frame[2]
+        v3 /= np.linalg.norm(v3)
+        player_frame[3] = v3
+        v1 = orientation[1].copy()
+        v1 -= np.dot(v1, player_frame[0]) * player_frame[0]
+        v1 -= np.dot(v1, player_frame[2]) * player_frame[2]
+        v1 -= np.dot(v1, player_frame[3]) * player_frame[3]
+        v1 /= np.linalg.norm(v1)
+        player_frame[1] = v1
+        return True
+
+    def test_row2_parallel_to_absolute_y(self):
+        """Frame row 2 is always parallel to [0,1,0,0] projected orthogonal to player."""
+        rng = np.random.default_rng(300)
+        for _ in range(20):
+            # Avoid players aligned with Y axis (degenerate case)
+            player = rng.standard_normal(4)
+            player[1] *= 0.3  # reduce Y component to avoid degeneracy
+            player /= np.linalg.norm(player)
+            orientation = self._make_frame(player)
+            for _ in range(rng.integers(1, 8)):
+                axis1, axis2 = rng.choice([1, 2, 3], 2, replace=False)
+                angle = rng.uniform(-0.3, 0.3)
+                rotate_frame_tangent(orientation, int(axis1), int(axis2), angle)
+            reorthogonalize_frame(orientation)
+
+            player_frame = build_player_frame(player, orientation)
+            ok = self._apply_fixed_up_override(player_frame, orientation)
+            self.assertTrue(ok, "Fixed up vector degenerate")
+
+            # Row 2 should be parallel to [0,1,0,0] projected orthogonal to player
+            expected_up = self.FIXED_UP - np.dot(self.FIXED_UP, player_frame[0]) * player_frame[0]
+            expected_up /= np.linalg.norm(expected_up)
+            dot = abs(np.dot(player_frame[2], expected_up))
+            self.assertAlmostEqual(dot, 1.0, places=8,
+                msg=f"Row 2 not parallel to absolute Y: dot={dot:.10f}")
+
+    def test_frame_orthonormal_after_override(self):
+        """Frame remains orthonormal after the fixed-Y override."""
+        rng = np.random.default_rng(301)
+        for _ in range(20):
+            player = rng.standard_normal(4)
+            player[1] *= 0.3
+            player /= np.linalg.norm(player)
+            orientation = self._make_frame(player)
+            for _ in range(rng.integers(1, 6)):
+                axis1, axis2 = rng.choice([1, 2, 3], 2, replace=False)
+                angle = rng.uniform(-0.5, 0.5)
+                rotate_frame_tangent(orientation, int(axis1), int(axis2), angle)
+            reorthogonalize_frame(orientation)
+
+            player_frame = build_player_frame(player, orientation)
+            ok = self._apply_fixed_up_override(player_frame, orientation)
+            self.assertTrue(ok)
+
+            product = player_frame @ player_frame.T
+            np.testing.assert_allclose(product, np.eye(4), atol=1e-8,
+                err_msg="Frame not orthonormal after fixed-Y override")
+
+    def test_screen_y_stable_under_horizontal_pan(self):
+        """Screen Y coords don't change when rotating with A/D (pan in row 1,3 plane)."""
+        rng = np.random.default_rng(302)
+        player = np.array([1.0, 0.0, 0.0, 0.0])
+        orientation = self._make_frame(player)
+
+        test_points = []
+        for _ in range(10):
+            p = rng.standard_normal(4)
+            p /= np.linalg.norm(p)
+            p = slerp(player, p, 0.05)
+            p /= np.linalg.norm(p)
+            test_points.append(p)
+
+        def get_screen_y_values(ori):
+            pf = build_player_frame(player, ori)
+            self._apply_fixed_up_override(pf, ori)
+            return np.array([pt @ pf.T for pt in test_points])[:, 2]
+
+        y_before = get_screen_y_values(orientation)
+        for _ in range(10):
+            rotate_frame_tangent(orientation, 1, 3, 0.05)
+        reorthogonalize_frame(orientation)
+        y_after = get_screen_y_values(orientation)
+
+        np.testing.assert_allclose(y_before, y_after, atol=1e-6,
+            err_msg="Screen Y changed after horizontal pan (A/D)")
 
 
 if __name__ == "__main__":

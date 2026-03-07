@@ -181,6 +181,20 @@ def rotate_frame(frame, axis_idx, angle):
     frame[axis_idx] = -sin_a * cam + cos_a * axis
 
 
+def rotate_frame_tangent(frame, axis1, axis2, angle):
+    """Rotate orientation frame in plane (row axis1, row axis2) by angle.
+
+    Rotates two tangent basis vectors around each other, keeping row 0
+    (camera position) unchanged. axis1 and axis2 should be in {1, 2, 3}.
+    Modifies frame in-place.
+    """
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+    v1 = frame[axis1].copy()
+    v2 = frame[axis2].copy()
+    frame[axis1] = cos_a * v1 + sin_a * v2
+    frame[axis2] = -sin_a * v1 + cos_a * v2
+
+
 def reorthogonalize_frame(frame):
     """Re-orthogonalize frame to correct numerical drift.
 
@@ -194,6 +208,23 @@ def reorthogonalize_frame(frame):
         for j in range(1, i):
             v -= np.dot(v, frame[j]) * frame[j]
         frame[i] = v / np.linalg.norm(v)
+
+
+def build_player_frame(player_pos, orientation):
+    """Build orthonormal 4x4 frame centered on player_pos.
+
+    Row 0 = player direction (unit), rows 1-3 = tangent basis orthogonal to player.
+    Uses orientation[1..3] as initial hints, then Gram-Schmidt to ensure orthogonality.
+    """
+    frame = np.empty((4, 4))
+    frame[0] = player_pos / np.linalg.norm(player_pos)
+    for i in range(1, 4):
+        v = orientation[i].copy()
+        v -= np.dot(v, frame[0]) * frame[0]
+        for j in range(1, i):
+            v -= np.dot(v, frame[j]) * frame[j]
+        frame[i] = v / np.linalg.norm(v)
+    return frame
 
 
 def tangent_basis(cam):
@@ -233,6 +264,23 @@ def project_to_tangent(cam, point, basis):
     # Project direction onto the 3 basis vectors
     coords = np.array([np.dot(direction, b) for b in basis])
     return coords * angle
+
+
+def w_to_color(w):
+    """Map w in [-1, 1] to RGB: -1→blue(0,0,255), 0→white(255,255,255), +1→red(255,0,0)."""
+    w = float(np.clip(w, -1.0, 1.0))
+    if w < 0:
+        # Interpolate blue → white: t=0 at w=-1 (blue), t=1 at w=0 (white)
+        t = w + 1.0  # 0..1
+        r = int(255 * t)
+        g = int(255 * t)
+        b = 255
+    else:
+        # Interpolate white → red: t=0 at w=0 (white), t=1 at w=+1 (red)
+        r = 255
+        g = int(255 * (1 - w))
+        b = int(255 * (1 - w))
+    return (r, g, b)
 
 
 def project_tangent_to_screen(tangent_xyz, screen_width, screen_height, scale=2500):
