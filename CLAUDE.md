@@ -57,7 +57,10 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 ## Current Implementation
 
 ### Files
-- `main.py` — Game loop, rendering, UI, input handling
+- `main.py` — Game loop, rendering, UI, input handling, mutable game state
+- `lib/constants.py` — Display/color/game constants, `distance_to_color()`, `format_dist()`
+- `lib/gamepedia.py` — Gamepedia content, layout constants (`GP_*`), `word_wrap_text()`
+- `lib/graphics.py` — Planet sprite loading/rendering, identicon generation, googly eyes
 - `sphere.py` — S³ math (point generation, distance, slerp, tangent space projection, orientation frame rotation, name decoding, colors)
 - `audio.py` — Procedural techno ambient music (synthesis, caching, proximity-based playback)
 - `tests/test_sphere.py` — Sphere math, navigation, and name generation tests (22 tests)
@@ -126,7 +129,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 ## Project-Specific Rules
 
 - **Math correctness:** Test 4D rotations carefully. Quaternion vs. matrix representation choice will impact implementation.
-- **Gamepedia maintenance:** When adding or changing features, update the corresponding `GAMEPEDIA_CONTENT` entries in `main.py` to keep the in-game encyclopedia accurate. Also update `tests/test_gamepedia.py` if topic structure changes (group/topic counts).
+- **Gamepedia maintenance:** When adding or changing features, update the corresponding `GAMEPEDIA_CONTENT` entries in `lib/gamepedia.py` to keep the in-game encyclopedia accurate. Also update `tests/test_gamepedia.py` if topic structure changes (group/topic counts).
 - **No commits without explicit request.** (Standard rule applies.)
 - **Iterative:** Expect this to evolve — start with basic traversal, then refine projection/rendering.
 

@@ -5,6 +5,15 @@ from collections import deque
 from io import BytesIO
 from pydenticon import Generator
 from audio import init_audio, update_audio, cleanup_audio, get_audio_params
+from lib.constants import *
+from lib.graphics import (
+    load_planet_sprites, get_planet_sprite, render_point_sprite,
+    draw_googly_eyes, get_identicon,
+)
+from lib.gamepedia import (
+    GP_LEFT_X, GP_LEFT_W, GP_TOP_Y, GP_LINE_H,
+    GAMEPEDIA_CONTENT, _gamepedia_flat, word_wrap_text,
+)
 from sphere import (
     random_point_on_s3,
     angular_distance,
@@ -29,7 +38,6 @@ pygame.mixer.pre_init(44100, -16, 2)
 pygame.init()
 init_audio()
 
-SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 800
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("4-Sphere Explorer")
 
@@ -43,53 +51,12 @@ clock = pygame.time.Clock()
 font = pygame.font.Font(None, 14)
 start_time = pygame.time.get_ticks()  # milliseconds since pygame init
 
-# Colors
-BG_COLOR = (20, 20, 30)
-POINT_COLOR = (200, 200, 255)
-CAMERA_COLOR = (255, 100, 100)
-SELECTED_COLOR = (255, 255, 100)
-TEXT_COLOR = (200, 200, 200)
-LIST_BG = (40, 40, 60)
-LIST_ITEM_BG = (60, 60, 90)
-LIST_ITEM_HOVER = (80, 80, 120)
-
-# Game state
-NUM_POINTS = 30_000
-FOV_ANGLE = 0.116  # radians, tuned for ~10 visible points
-GAME_SEED = 42
-ARRIVAL_THRESHOLD = 0.0005  # radians (0.5 mrad) — snap to target when this close
-CAMERA_OFFSET = 0.08  # radians — camera orbital distance from player
-ROTATION_SPEED = 0.02  # radians per frame for WASD/QE
-TRAVEL_SPEED = 0.00008  # slerp progress per frame
-POP_DURATION = 400  # milliseconds for arrival pop animation
-TRIANGLE_PERIOD = 6000.0  # milliseconds for one full triangle rotation
-
 # Starfield: random 4D directions for parallax background
-NUM_STARS = 200
 _star_rng = np.random.default_rng(seed=123)
 _star_dirs = _star_rng.standard_normal((NUM_STARS, 4))
 _star_dirs /= np.linalg.norm(_star_dirs, axis=1, keepdims=True)
 _star_brightness = _star_rng.uniform(0.15, 0.6, NUM_STARS)
 _star_sizes = _star_rng.choice([1, 1, 1, 2], NUM_STARS)
-
-# Distance color mapping: green (near) -> yellow (mid) -> red (far)
-def distance_to_color(dist):
-    """Map angular distance to RGB color gradient, scaled to FOV_ANGLE."""
-    t = min(1.0, dist / FOV_ANGLE)  # 0 = at camera, 1 = at edge of LoS
-    if t <= 0.6:
-        # Green to yellow: 0–60% of LoS
-        f = t / 0.6
-        return (int(255 * f), 255, 0)
-    else:
-        # Yellow to red: 60–100% of LoS
-        f = (t - 0.6) / 0.4
-        return (255, int(255 * (1 - f)), 0)
-
-def format_dist(rad):
-    """Format angular distance: mrad if < 1 rad, else rad."""
-    if rad < 1.0:
-        return f"{rad * 1000:.0f} mrad"
-    return f"{rad:.2f} rad"
 
 player_pos = np.array([1.0, 0.0, 0.0, 0.0])
 camera_pos = np.array([np.cos(CAMERA_OFFSET), 0.0, np.sin(CAMERA_OFFSET), 0.0])
@@ -121,120 +88,6 @@ point_colors = random_color(NUM_POINTS)  # Assign random colors
 # Lazy identicon cache: idx -> pygame Surface
 point_identicon_cache = {}
 
-def get_identicon(idx):
-    """Get or generate identicon for a point, with lazy caching."""
-    if idx not in point_identicon_cache:
-        name = get_name(idx)
-        r, g, b = point_colors[idx]
-        hex_color = f"#{r:02x}{g:02x}{b:02x}"
-        generator = Generator(12, 12, foreground=[hex_color], background="#000000")
-        png_bytes = generator.generate(name, 24, 24, inverted=False)
-        identicon_surface = pygame.image.load(BytesIO(png_bytes))
-        identicon_with_margin = pygame.Surface((32, 32))
-        identicon_with_margin.fill((0, 0, 0))
-        identicon_with_margin.blit(identicon_surface, (4, 4))
-        point_identicon_cache[idx] = identicon_with_margin
-    return point_identicon_cache[idx]
-
-def draw_googly_eyes(surface, x, y, mouse_pos, scale=1):
-    """Draw googly eyes on top of an identicon at screen pos (x, y). scale=1 for 32px, scale=4 for 128px."""
-    eye_radius = 4 * scale
-    pupil_radius = 2 * scale
-    eye_y = y + 10 * scale
-    left_eye_x = x + 10 * scale
-    right_eye_x = x + 22 * scale
-    max_offset = eye_radius - pupil_radius
-
-    for ex in (left_eye_x, right_eye_x):
-        pygame.draw.circle(surface, (255, 255, 255), (ex, eye_y), eye_radius)
-        dx = mouse_pos[0] - ex
-        dy = mouse_pos[1] - eye_y
-        dist = max((dx * dx + dy * dy) ** 0.5, 0.001)
-        ox = int(dx / dist * max_offset)
-        oy = int(dy / dist * max_offset)
-        pygame.draw.circle(surface, (0, 0, 0), (ex + ox, eye_y + oy), pupil_radius)
-
-# Planet sprite loader
-planet_sprites = {}  # filename -> pygame.Surface
-
-def load_planet_sprites():
-    """Load all 10 planet sprites from assets/planets/ directory."""
-    import os
-    planet_dir = "assets/planets"
-    if not os.path.isdir(planet_dir):
-        print(f"WARNING: Planet directory not found at {planet_dir}")
-        return False
-
-    planet_files = [f"planet_{i:02d}.png" for i in range(1, 11)]
-    loaded_count = 0
-
-    for filename in planet_files:
-        filepath = os.path.join(planet_dir, filename)
-        try:
-            if os.path.exists(filepath):
-                img = pygame.image.load(filepath)
-                planet_sprites[filename] = img
-                loaded_count += 1
-            else:
-                print(f"WARNING: {filename} not found at {filepath}")
-        except Exception as e:
-            print(f"ERROR loading {filename}: {e}")
-
-    success = loaded_count == len(planet_files)
-    print(f"Loaded {loaded_count}/{len(planet_files)} planet sprites")
-    return success
-
-def get_planet_sprite(point_idx):
-    """Get a planet sprite for a point, deterministically based on its index.
-
-    Args:
-        point_idx: Point index (0 to NUM_POINTS-1)
-
-    Returns:
-        pygame.Surface or None if sprites not loaded
-    """
-    if not planet_sprites:
-        return None
-    # Hash-based selection: deterministic mapping of point to sprite
-    sprite_idx = (point_idx * 73) % 10  # Use prime multiplier for distribution
-    filename = f"planet_{sprite_idx + 1:02d}.png"
-    return planet_sprites.get(filename)
-
-def render_point_sprite(screen, sprite, p2d, radius, color):
-    """Render a colorized planet sprite at screen position.
-
-    Args:
-        screen: pygame.Surface to draw to
-        sprite: pygame.Surface sprite to render
-        p2d: (x, y) screen position
-        radius: Approximate sprite size (will scale sprite to ~2*radius)
-        color: (r, g, b) color to multiply sprite by
-    """
-    if sprite is None:
-        return False
-
-    # Scale sprite to match desired radius (sprite is 64x64)
-    scale_size = max(4, int(2 * radius))
-    try:
-        scaled_sprite = pygame.transform.scale(sprite, (scale_size, scale_size))
-
-        # Colorize by multiplying the sprite colors
-        # Create a new surface with the color tint applied
-        tinted = scaled_sprite.copy()
-        # Use a color surface to multiply
-        color_surf = pygame.Surface((scale_size, scale_size))
-        color_surf.fill(color)
-        color_surf.set_colorkey((0, 0, 0))
-        tinted.blit(color_surf, (0, 0), special_flags=pygame.BLEND_MULT)
-
-        # Draw at position
-        draw_pos = (int(p2d[0]) - scale_size // 2, int(p2d[1]) - scale_size // 2)
-        screen.blit(tinted, draw_pos)
-        return True
-    except Exception as e:
-        print(f"ERROR rendering sprite: {e}")
-        return False
-
 traveling = False
 travel_target = None
 travel_target_idx = None
@@ -252,9 +105,6 @@ auto_travel_feedback = None  # (message, timestamp) or None
 auto_travel_feedback_duration = 2000  # milliseconds
 
 # Radial menu state
-HOLD_THRESHOLD = 200  # ms before radial menu opens
-MENU_RADIUS = 50  # pixel radius of radial menu
-WEDGE_INNER = 15  # inner dead zone radius
 menu_state = "idle"  # idle | hold_pending | menu_open
 menu_hold_start = 0  # tick when mouse went down on a point
 menu_point_idx = None  # point index the menu is for
@@ -323,243 +173,6 @@ search_active = False
 gamepedia_open = False
 gamepedia_selected_topic = 0
 gamepedia_scroll = 0
-
-# Gamepedia layout constants (shared between click handling and rendering)
-GP_LEFT_X = 40
-GP_LEFT_W = 280
-GP_TOP_Y = 56
-GP_LINE_H = 24
-
-GAMEPEDIA_CONTENT = [
-    ("Controls", [
-        ("Keyboard", """\
-WASD  Rotate your view up/down/left/right
-Q/E   Rotate along the 4th axis (the "depth" you can't normally see)
-V     Switch coloring mode (4 modes — see View Modes)
-Tab   Jump to the closest unvisited point
-/ F   Open the name search bar
-F1    Open/close this screen
-Ctrl +/-  Zoom in XYZ projection modes"""),
-        ("Mouse", """\
-Click a point in the viewport to fly there. Hold-click to open the \
-radial menu instead.
-
-Click a name in the sidebar to fly to that point.
-
-Drag anywhere in the viewport to rotate your view freely.
-
-Mouse wheel zooms when in XYZ projection modes (2 and 3)."""),
-        ("View Modes", """\
-Press V to cycle through four coloring modes:
-
-Assigned: Every point keeps one random color forever. Good for \
-recognizing individual points at a glance.
-
-4D Position: Color is computed from the direction to each point in \
-4D space. Nearby points look similar; far-away points look different.
-
-XYZ Projection: Points are plotted by their 3D position relative to \
-you. The hidden 4th coordinate (W) becomes a blue-to-white-to-red \
-color gradient. Scroll to zoom.
-
-XYZ Fixed-Y: Same as XYZ Projection, but the vertical axis is locked \
-to an absolute "up" direction instead of rotating with you."""),
-    ]),
-    ("Navigation", [
-        ("Travel & Slerp", """\
-Click any point to travel to it. You don't fly in a straight line — \
-you slide along the curved surface of the 4-sphere, following the \
-shortest path (a "great circle arc"). This curved motion is called \
-slerp (spherical linear interpolation).
-
-When you get close enough (within 0.02 rad), you snap onto the point \
-and a blue ring pops outward to confirm arrival.
-
-Your entire view frame travels with you, so the camera smoothly \
-rotates as you move. Nothing jumps or flickers."""),
-        ("Travel Queue", """\
-Already flying somewhere? Click another point to queue it up. You'll \
-automatically continue to the queued destination after arriving.
-
-The sidebar marks your current target with < and your queued target \
-with << in blue."""),
-        ("Auto-Travel (Tab)", """\
-Press Tab to auto-travel to the nearest visible point you haven't \
-visited yet. If you're mid-flight, it queues instead.
-
-Visited points are tracked for the whole session. The sidebar dims \
-points you've already been to, and a trail of fading dots shows your \
-recent path through the viewport."""),
-        ("Search & Filter", """\
-Press / or F to open the search bar at the top of the sidebar. Start \
-typing a name and the list filters in real-time (case-insensitive, \
-prefix match).
-
-Press Escape to clear the filter and close the search bar. You can \
-still scroll the filtered list with UP/DOWN while typing."""),
-    ]),
-    ("World", [
-        ("Points & Names", """\
-There are 30,000 points scattered uniformly across the surface of \
-the 4-sphere. Each one has a unique name built from syllable chunks — \
-a core, an ending, sometimes a suffix or number. The name space holds \
-11.8 million possibilities, so every point gets something distinct.
-
-Names are generated from a fixed random seed (42), so they're always \
-the same between sessions."""),
-        ("Planet Types", """\
-Each point is drawn as a tiny planet sprite. There are 10 types:
-
-Earth, Mars, Jupiter, Frost, Inferno, Desert, Jungle, Methane, \
-Saturn, and Void.
-
-Which type a point gets is determined by a hash of its index — always \
-the same point, always the same planet. The detail panel (hold-click \
-> Info) shows a bigger version with a random rotation and mirror flip \
-unique to that point."""),
-        ("Colors & View Modes", """\
-In Assigned mode every point picks a random HSV color at startup and \
-keeps it forever. In 4D Position mode, the color is computed from the \
-relative direction vector in 4D — similar directions get similar hues.
-
-In the two XYZ modes, the 4th coordinate (W) maps to a gradient: \
-blue for negative W, white near zero, red for positive.
-
-Whichever mode you're in, the sidebar, tooltip, and detail panel all \
-use the exact same color as the viewport dot."""),
-        ("Identicons", """\
-Every point has a small pixel-art avatar (identicon) generated from \
-its name hash. You'll see it in the sidebar next to each name, in \
-hover tooltips, and at large size in the detail panel.
-
-They also have googly eyes that follow your mouse cursor."""),
-    ]),
-    ("Audio", [
-        ("Procedural Music", """\
-Every point emits its own ambient sound — a 15-second looping \
-soundscape generated entirely from its name key. No two points sound \
-the same. There are over 2 million possible combinations of timbre, \
-scale, root note, and tempo.
-
-You can only hear points within 10 mrad of your position. Volume \
-fades linearly as you move away, so traveling through a cluster of \
-points creates a shifting mix."""),
-        ("Timbres & Scales", """\
-Each point's sound picks one of 10 timbres: supersaw pad, acid bass, \
-synth pluck, FM bass, noise drone, ring modulation, pulse-width \
-modulation, organ, wavefold, or stutter.
-
-The melody follows one of 12 scales (pentatonic, dorian, blues, \
-harmonic minor, etc.) with a root note anywhere from a deep 33 Hz \
-rumble up to a bright 466 Hz tone. Tempo ranges from a slow drone \
-(5 seconds per note) to rapid pulses (0.08 seconds)."""),
-        ("Spatial Mixing", """\
-As you fly around, sounds crossfade naturally — nearby points get \
-louder, distant ones disappear. Each loop crossfades its own start \
-and end so there's no click or gap.
-
-High harmonics roll off above 580 Hz to keep everything warm and \
-blendable. All loops are volume-normalized so no single point blasts \
-over the others."""),
-    ]),
-    ("4D Geometry", [
-        ("What is S3?", """\
-S3 is the "3-sphere" — the 4D equivalent of a regular sphere. Just \
-as a normal sphere (S2) is the set of all points at distance 1 from \
-the center in 3D space, S3 is the set of all points at distance 1 \
-from the center in 4D space:
-
-  x*x + y*y + z*z + w*w = 1
-
-It's a closed, finite 3D space with no edges or boundaries. If you \
-travel in any direction long enough, you come back to where you started \
-— like walking around the Earth, but in one more dimension.
-
-S3 shows up in physics (quaternion rotations, particle spin states) \
-and topology. This explorer lets you actually walk around on it."""),
-        ("Tangent Space Projection", """\
-You can't see 4D directly, so the game projects everything onto a \
-flat screen. Here's how:
-
-At your position on S3, there's a 3D "tangent plane" — the flat space \
-that just barely touches the sphere at that point (like a table \
-touching a basketball). The camera uses three perpendicular direction \
-vectors in this tangent plane as its local X/Y/Z axes.
-
-Nearby points get projected onto these axes, giving 3D coordinates \
-that get drawn on screen. Points farther away in angular distance \
-appear smaller and dimmer — like depth fog, but on a curved surface."""),
-        ("Orientation Frame", """\
-Your camera state is stored as four 4D vectors bundled into a matrix:
-
-Row 0: your position on S3 (a unit vector in 4D).
-Rows 1-3: three perpendicular directions in the tangent plane (your \
-local right, up, and "into the screen" axes).
-
-When you press WASD or QE, the game rotates your position and one \
-of these axes together in a 2D plane — that's how you turn without \
-leaving the sphere's surface.
-
-After each rotation, Gram-Schmidt correction keeps all four vectors \
-exactly perpendicular and unit-length, preventing drift from piling \
-up over thousands of frames."""),
-    ]),
-    ("UI", [
-        ("Sidebar", """\
-The right panel lists every visible point, sorted nearest-first. Each \
-row shows the point's identicon, name, and distance (in milliradians \
-for close points, radians for far ones).
-
-Scroll with UP/DOWN. Click any row to fly there. Already-visited \
-points appear dimmed. The header shows how many points are visible \
-and how many you've visited this session."""),
-        ("Tooltip", """\
-Hover your mouse over any point in the viewport to see a floating \
-tooltip with the point's identicon, name, and distance. The border \
-color matches the point's display color in the current view mode.
-
-Hovering a name in the sidebar highlights the matching point in the \
-viewport with a white circle outline."""),
-        ("Detail Panel & Radial Menu", """\
-Hold-click (don't release immediately) on a point to pop open a \
-radial menu. Move to the "Info" wedge and release to open the detail \
-panel.
-
-The panel shows a large planet sprite and identicon, the point's \
-name, exact distance, full 4D coordinates (x, y, z, w), and its \
-audio parameters: which timbre and scale it uses, root frequency, \
-and tempo.
-
-Click anywhere else to dismiss the panel."""),
-    ]),
-]
-
-# Flatten topics for indexed access: list of (group_name, title, text)
-_gamepedia_flat = []
-for _gname, _topics in GAMEPEDIA_CONTENT:
-    for _title, _text in _topics:
-        _gamepedia_flat.append((_gname, _title, _text))
-
-
-def word_wrap_text(text, max_width, render_font):
-    """Split text into lines that fit within max_width pixels."""
-    lines = []
-    for paragraph in text.split("\n"):
-        if not paragraph:
-            lines.append("")
-            continue
-        words = paragraph.split(" ")
-        current = words[0]
-        for word in words[1:]:
-            test = current + " " + word
-            if render_font.size(test)[0] <= max_width:
-                current = test
-            else:
-                lines.append(current)
-                current = word
-        lines.append(current)
-    return lines
-
 
 def apply_search_filter(search_query):
     """Filter visible_indices by name prefix match.
@@ -1206,7 +819,7 @@ while running:
         label = f"{name} ({format_dist(h_dist)})"
         label_surface = font.render(label, True, TEXT_COLOR)
         label_rect = label_surface.get_rect()
-        identicon = get_identicon(h_idx)
+        identicon = get_identicon(h_idx, point_identicon_cache, get_name(h_idx), point_colors[h_idx])
 
         # Total width: identicon (32px) + gap (4px) + label
         tooltip_width = 32 + 4 + label_rect.width
@@ -1361,7 +974,7 @@ while running:
                 panel_surf.blit(sprite_display, (sprite_x, padding))
 
             # Draw large identicon in top-left with googly eyes
-            large_identicon = pygame.transform.scale(get_identicon(inspected_point_idx), (identicon_size, identicon_size))
+            large_identicon = pygame.transform.scale(get_identicon(inspected_point_idx, point_identicon_cache, get_name(inspected_point_idx), point_colors[inspected_point_idx]), (identicon_size, identicon_size))
             ident_x = padding
             ident_y = padding
             panel_surf.blit(large_identicon, (ident_x, ident_y))
@@ -1441,7 +1054,7 @@ while running:
         pygame.draw.rect(screen, item_bg, (SCREEN_WIDTH - 290, y, 290, item_height))
 
         # Identicon from point name
-        identicon = get_identicon(point_idx)
+        identicon = get_identicon(point_idx, point_identicon_cache, get_name(point_idx), point_colors[point_idx])
         screen.blit(identicon, (SCREEN_WIDTH - 285, y + 4))
         draw_googly_eyes(screen, SCREEN_WIDTH - 285, y + 4, pygame.mouse.get_pos())
 

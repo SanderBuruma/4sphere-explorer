@@ -1,60 +1,11 @@
-"""Tests for gamepedia click-to-select geometry and word_wrap_text.
-
-Cannot import main.py directly because it runs a pygame game loop at module
-level (no __name__ guard).  Constants, content structure, and word_wrap_text
-are duplicated here and must be kept in sync with main.py.
-"""
+"""Tests for gamepedia click-to-select geometry and word_wrap_text."""
 import unittest
 from unittest.mock import MagicMock
 
-# ── Layout constants (must match main.py) ──────────────────────────────────
-GP_LEFT_X = 40
-GP_LEFT_W = 280
-GP_TOP_Y = 56
-GP_LINE_H = 24
-
-# ── Content structure (group_name, [(title, text), ...]) ───────────────────
-# Only the group/topic structure matters for click geometry; text is stubbed.
-GAMEPEDIA_CONTENT = [
-    ("Controls", [("Keyboard", ""), ("Mouse", ""), ("View Modes", "")]),
-    ("Navigation", [("Travel & Slerp", ""), ("Travel Queue", ""),
-                     ("Auto-Travel (Tab)", ""), ("Search & Filter", "")]),
-    ("World", [("Points & Names", ""), ("Planet Types", ""),
-               ("Colors & View Modes", ""), ("Identicons", "")]),
-    ("Audio", [("Procedural Music", ""), ("Timbres & Scales", ""),
-               ("Spatial Mixing", "")]),
-    ("4D Geometry", [("What is S3?", ""), ("Tangent Space Projection", ""),
-                      ("Orientation Frame", "")]),
-    ("UI", [("Sidebar", ""), ("Tooltip", ""),
-            ("Detail Panel & Radial Menu", "")]),
-]
-
-# ── Flat topic list (same construction as main.py) ─────────────────────────
-_gamepedia_flat = []
-for _gname, _topics in GAMEPEDIA_CONTENT:
-    for _title, _text in _topics:
-        _gamepedia_flat.append((_gname, _title, _text))
-
-
-# ── word_wrap_text (copied verbatim from main.py) ─────────────────────────
-def word_wrap_text(text, max_width, render_font):
-    """Split text into lines that fit within max_width pixels."""
-    lines = []
-    for paragraph in text.split("\n"):
-        if not paragraph:
-            lines.append("")
-            continue
-        words = paragraph.split(" ")
-        current = words[0]
-        for word in words[1:]:
-            test = current + " " + word
-            if render_font.size(test)[0] <= max_width:
-                current = test
-            else:
-                lines.append(current)
-                current = word
-        lines.append(current)
-    return lines
+from lib.gamepedia import (
+    GP_LEFT_X, GP_LEFT_W, GP_TOP_Y, GP_LINE_H,
+    GAMEPEDIA_CONTENT, _gamepedia_flat, word_wrap_text,
+)
 
 
 # ── Helper functions ───────────────────────────────────────────────────────
