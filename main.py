@@ -6,9 +6,10 @@ from io import BytesIO
 from pydenticon import Generator
 from audio import init_audio, update_audio, cleanup_audio, get_audio_params
 from lib.constants import *
-from lib.graphics import (
-    load_planet_sprites, get_planet_sprite, render_point_sprite,
-    draw_googly_eyes, get_identicon,
+from lib.graphics import draw_googly_eyes, get_identicon
+from lib.planets import (
+    get_planet_equirect, render_planet_frame, get_planet_rotation_angle,
+    reset_frame_budget, evict_planet_cache,
 )
 from lib.gamepedia import (
     GP_LEFT_X, GP_LEFT_W, GP_TOP_Y, GP_LINE_H,
@@ -202,17 +203,20 @@ def update_visible():
 
     # Evict caches for points no longer visible
     new_set = set(visible_indices)
-    for idx in prev_set - new_set:
+    evicted = prev_set - new_set
+    for idx in evicted:
         point_identicon_cache.pop(idx, None)
         point_name_cache.pop(idx, None)
+    evict_planet_cache(evicted)
 
 
 update_visible()
-load_planet_sprites()
 
 running = True
 while running:
     clock.tick(60)
+    reset_frame_budget()
+    elapsed_ms = pygame.time.get_ticks()
 
     # Handle input
     keys = pygame.key.get_pressed()
@@ -648,12 +652,14 @@ while running:
                 pygame.draw.circle(glow_surf, (*color, 60), (glow_radius + 2, glow_radius + 2), glow_radius)
                 screen.blit(glow_surf, (int(p2d[0]) - glow_radius - 2, int(p2d[1]) - glow_radius - 2))
 
-                # Try to render sprite; fall back to circle if sprite not available
-                sprite = get_planet_sprite(idx)
-                if sprite and render_point_sprite(screen, sprite, p2d, radius, color):
-                    pass  # Sprite rendered successfully
+                # Render rotating planet; fall back to circle if not yet cached
+                equirect = get_planet_equirect(idx, _name_keys[idx])
+                if equirect is not None:
+                    rot = get_planet_rotation_angle(idx, elapsed_ms)
+                    sz = max(4, int(2 * radius))
+                    surf = render_planet_frame(equirect, sz, rot, tint_color=color)
+                    screen.blit(surf, (int(p2d[0]) - sz // 2, int(p2d[1]) - sz // 2))
                 else:
-                    # Fallback to circle if sprite missing
                     pygame.draw.circle(screen, color, p2d.astype(int), radius)
 
                 # Inspection ring on currently inspected point
@@ -940,38 +946,13 @@ while running:
             panel_color = point_display_colors.get(inspected_point_idx, point_colors[inspected_point_idx])
             pygame.draw.rect(panel_surf, (*panel_color, 120), (0, 0, panel_w, panel_h), 1, border_radius=4)
 
-            # Draw large sprite at top of panel
-            sprite = get_planet_sprite(inspected_point_idx)
-            if sprite is not None:
-                scaled_sprite = pygame.transform.scale(sprite, (sprite_size, sprite_size))
-
-                # Use same color as 3D view (hue from point, brightness from distance)
-                point_color = point_display_colors.get(inspected_point_idx, point_colors[inspected_point_idx])
-
-                # Colorize sprite using BLEND_MULT (same method as 3D viewport)
-                colorized = scaled_sprite.copy()
-                color_surf = pygame.Surface((sprite_size, sprite_size))
-                color_surf.fill(point_color)
-                color_surf.set_colorkey((0, 0, 0))
-                colorized.blit(color_surf, (0, 0), special_flags=pygame.BLEND_MULT)
-
-                # Apply random rotation and mirroring based on point hash
-                sprite_seed = (inspected_point_idx * 73) % 360  # Deterministic rotation per point
-                rotation_angle = sprite_seed % 360
-                should_flip = (inspected_point_idx * 157) % 2 == 0  # Deterministic 50% flip per point
-
-                # Apply transformations
-                rotated = pygame.transform.rotate(colorized, rotation_angle)
-                if should_flip:
-                    rotated = pygame.transform.flip(rotated, True, False)
-
-                # Center the rotated sprite (may be larger due to rotation)
-                rotated_rect = rotated.get_rect(center=(sprite_size // 2, sprite_size // 2))
-                sprite_display = pygame.Surface((sprite_size, sprite_size), pygame.SRCALPHA)
-                sprite_display.blit(rotated, rotated_rect)
-
-                sprite_x = identicon_size + padding * 2
-                panel_surf.blit(sprite_display, (sprite_x, padding))
+            # Draw rotating planet at top of panel
+            point_color = point_display_colors.get(inspected_point_idx, point_colors[inspected_point_idx])
+            equirect = get_planet_equirect(inspected_point_idx, _name_keys[inspected_point_idx])
+            if equirect is not None:
+                rot = get_planet_rotation_angle(inspected_point_idx, elapsed_ms)
+                planet_surf = render_planet_frame(equirect, sprite_size, rot, tint_color=point_color)
+                panel_surf.blit(planet_surf, (identicon_size + padding * 2, padding))
 
             # Draw large identicon in top-left with googly eyes
             large_identicon = pygame.transform.scale(get_identicon(inspected_point_idx, point_identicon_cache, get_name(inspected_point_idx), point_colors[inspected_point_idx]), (identicon_size, identicon_size))

@@ -84,15 +84,14 @@ a core, an ending, sometimes a suffix or number. The name space holds \
 Names are generated from a fixed random seed (42), so they're always \
 the same between sessions."""),
         ("Planet Types", """\
-Each point is drawn as a tiny planet sprite. There are 10 types:
+Each point is drawn as a tiny rotating planet. Surfaces are procedurally \
+generated from smooth gradient noise — no two planets look alike. There \
+are 12 color palettes (Sunset, Deep Sea, Aurora, Ember, Arctic, etc.) \
+and unique noise offsets per point, producing millions of variations.
 
-Earth, Mars, Jupiter, Frost, Inferno, Desert, Jungle, Methane, \
-Saturn, and Void.
-
-Which type a point gets is determined by a hash of its index — always \
-the same point, always the same planet. The detail panel (hold-click \
-> Info) shows a bigger version with a random rotation and mirror flip \
-unique to that point."""),
+Planets spin slowly (one full rotation every 20 seconds) with a \
+per-planet phase offset so they're not all synchronized. The detail \
+panel (hold-click > Info) shows a larger spinning version."""),
         ("Colors & View Modes", """\
 In Assigned mode every point picks a random HSV color at startup and \
 keeps it forever. In 4D Position mode, the color is computed from the \
