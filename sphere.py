@@ -227,6 +227,38 @@ def build_player_frame(player_pos, orientation):
     return frame
 
 
+def build_fixed_y_frame(player_pos):
+    """Build orientation-independent orthonormal frame for Fixed-Y XYZ view.
+
+    Row 0 = unit player direction, rows 1-3 derived from absolute axes
+    [0,1,0,0], [0,0,1,0], [0,0,0,1] via Gram-Schmidt.
+    Returns 4x4 frame, or None if player is too aligned with all hints.
+    """
+    frame = np.empty((4, 4))
+    p = player_pos / np.linalg.norm(player_pos)
+    frame[0] = p
+    hints = [
+        np.array([0.0, 1.0, 0.0, 0.0]),
+        np.array([0.0, 0.0, 1.0, 0.0]),
+        np.array([0.0, 0.0, 0.0, 1.0]),
+    ]
+    axes = []
+    for h in hints:
+        v = h.copy()
+        v -= np.dot(v, p) * p
+        for a in axes:
+            v -= np.dot(v, a) * a
+        n = np.linalg.norm(v)
+        if n > 1e-8:
+            axes.append(v / n)
+    if len(axes) < 3:
+        return None
+    frame[1] = axes[0]
+    frame[2] = axes[1]
+    frame[3] = axes[2]
+    return frame
+
+
 def tangent_basis(cam):
     """Compute 3 orthonormal vectors spanning the tangent space at cam on S³."""
     candidates = np.eye(4)
