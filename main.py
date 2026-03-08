@@ -16,7 +16,6 @@ from sphere import (
     rotate_frame_tangent,
     reorthogonalize_frame,
     build_player_frame,
-    build_fixed_y_frame,
     project_to_tangent,
     project_tangent_to_screen,
     slerp,
@@ -61,7 +60,7 @@ GAME_SEED = 42
 ARRIVAL_THRESHOLD = 0.0005  # radians (0.5 mrad) — snap to target when this close
 CAMERA_OFFSET = 0.08  # radians — camera orbital distance from player
 ROTATION_SPEED = 0.02  # radians per frame for WASD/QE
-TRAVEL_SPEED = 0.00004  # slerp progress per frame
+TRAVEL_SPEED = 0.000008  # slerp progress per frame
 POP_DURATION = 400  # milliseconds for arrival pop animation
 TRIANGLE_PERIOD = 6000.0  # milliseconds for one full triangle rotation
 
@@ -649,11 +648,26 @@ while running:
         player_frame = build_player_frame(player_pos, orientation)
 
         if view_mode == 3:
-            # Build frame purely from player_pos + absolute axes (no orientation dependency)
-            # This ensures W→color is stable regardless of camera rotation
-            fixed_frame = build_fixed_y_frame(player_pos)
-            if fixed_frame is not None:
-                player_frame = fixed_frame
+            # Override Y axis with absolute Y direction (orthogonalized against player)
+            up = XYZ_FIXED_UP.copy()
+            up -= np.dot(up, player_frame[0]) * player_frame[0]
+            up_norm = np.linalg.norm(up)
+            if up_norm > 1e-8:
+                up /= up_norm
+                player_frame[2] = up
+                # Re-derive row 3: orthogonalize orientation[3] against rows 0 and 2
+                v3 = orientation[3].copy()
+                v3 -= np.dot(v3, player_frame[0]) * player_frame[0]
+                v3 -= np.dot(v3, player_frame[2]) * player_frame[2]
+                v3 /= np.linalg.norm(v3)
+                player_frame[3] = v3
+                # Row 1 completes the orthonormal basis
+                v1 = orientation[1].copy()
+                v1 -= np.dot(v1, player_frame[0]) * player_frame[0]
+                v1 -= np.dot(v1, player_frame[2]) * player_frame[2]
+                v1 -= np.dot(v1, player_frame[3]) * player_frame[3]
+                v1 /= np.linalg.norm(v1)
+                player_frame[1] = v1
 
         vis_points = points[visible_indices]  # (M, 4)
         rel_vis = vis_points @ player_frame.T  # columns: [along_player, basis1, basis2, basis3]
