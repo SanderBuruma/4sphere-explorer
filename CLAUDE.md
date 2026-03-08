@@ -62,13 +62,14 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - `audio.py` — Procedural techno ambient music (synthesis, caching, proximity-based playback)
 - `tests/test_sphere.py` — Sphere math, navigation, and name generation tests (22 tests)
 - `tests/test_audio.py` — Audio signal generation and quality tests (17 tests)
+- `tests/test_gamepedia.py` — Gamepedia click geometry and word-wrap tests (12 tests)
 - `assets/planets/` — 10 planet sprite PNGs (64×64) + `planet_index.txt` manifest
 - `.gitignore` — venv exclusions
 
 ### Scale
 - **30,000 points** uniformly distributed on S³ surface
 - **FOV: 0.116 rad** (~6.6°) — tuned to show ~10 visible points at once
-- **Travel speed:** 0.000008 per frame (5x slower than original)
+- **Travel speed:** 0.00008 per frame (10x faster than previous 0.000008)
 - **Projection scale:** 2500 (10x original for narrow FOV)
 - **Camera distance:** 0.08 rad from player (reduced from 0.15 for tight framing)
 
@@ -78,15 +79,18 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - **Tangent space projection:** Points projected into camera's local tangent plane, so visible points cluster around crosshair
 - **Planet sprites:** 10 distinct planet types (Earth, Mars, Jupiter, Frost, Inferno, Desert, Jungle, Methane, Saturn, Void) rendered as colorized sprites instead of circles. Hash-based deterministic selection per point (same point = same planet type). Falls back to circles if sprites missing
 - **Unified point coloring:** All UI elements (3D viewport, tooltip, detail panel, sidebar, inspection ring) use the same color per point. No distance-based brightness or hue modulation — color is purely from the point's identity
-- **Two view modes** (toggle V):
-  - Assigned: permanent random HSV colors per point
-  - 4D Position: color derived from normalized relative 4D direction (shows which direction in 4D space)
+- **Four view modes** (toggle V):
+  - 0: Assigned — permanent random HSV colors per point
+  - 1: 4D Position — color derived from normalized relative 4D direction
+  - 2: XYZ Projection — 3D position relative to player, W coordinate → blue/white/red color
+  - 3: XYZ Fixed-Y — like mode 2 but Y axis locked to absolute [0,1,0,0], only horizontal panning
 - **Navigation:** Click points in view or list to travel (slerp interpolation); WASD/QE rotate camera relative to current orientation
   - Travel completes at 0.02 rad proximity (snap to target) → pop animation (400ms expanding fade-out circle)
   - Travel target marked with `<` in list and 3 rotating blue triangles in view (6s rotation)
   - **Travel queue:** Clicking a new target while traveling queues it; travel starts after arriving at current target. Queued target shown with `<<` in list (blue)
 - **UI:** Crosshair at camera position, scrollable distance-sorted list with point colors, hover tooltips with identicons
 - **Detail panel:** Radial menu "Info" option shows large (128×128) colorized planet sprite with random rotation/mirroring per point, plus name, distance, 4D coordinates, and audio parameters
+- **Gamepedia (F1):** In-game encyclopedia overlay. Left panel lists topics grouped by category (Controls, Navigation, World, Audio, 4D Geometry, UI) with per-group accent colors. Right panel shows word-wrapped scrollable content. Click topics or use UP/DOWN to navigate, mouse wheel to scroll content. All game input suppressed while open. Layout constants (`GP_LEFT_X`, `GP_LEFT_W`, `GP_TOP_Y`, `GP_LINE_H`) shared between click handler and renderer. Content in `GAMEPEDIA_CONTENT` must be kept up to date when features change.
 - **Distance display:** mrad for distances < 1 rad, rad for >= 1 rad
 - **Procedural ambient music:** Each point has a unique techno soundscape (seeded by name key), audible within 10 mrad (`AUDIO_RANGE`). Volume fades linearly with distance. Ten timbres: supersaw pad, acid bass, synth pluck, FM bass, noise drone, ring mod, PWM, organ, wavefold, stutter — root 33–466 Hz (MIDI 25–70), harmonics capped at 700 Hz with rolloff above 580 Hz. Twelve scales (pentatonic, dorian, phrygian, whole tone, blues, harmonic minor, lydian, mixolydian, locrian, japanese in-sen). Five tempo levels (0.08–5.0s). Tone frequencies octave-folded above 580 Hz. 2.14M+ discrete configurations. RMS-normalized for consistent perceived loudness. 15-second seamless loops with crossfade
 
@@ -96,11 +100,13 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 | W/S | Rotate up/down (relative to view) |
 | A/D | Rotate left/right (relative to view) |
 | Q/E | Rotate in 4D depth |
-| V | Toggle view mode (Assigned ↔ 4D Position) |
+| V | Cycle view mode (Assigned → 4D Position → XYZ Projection → XYZ Fixed-Y) |
+| Ctrl +/- or scroll (modes 2-3) | Zoom XYZ projection |
 | UP/DOWN | Scroll point list |
 | Drag | Rotate camera (relative to view) |
 | Left click (view) | Travel to nearest point |
 | Left click (list) | Travel to selected point |
+| F1 | Toggle Gamepedia encyclopedia |
 
 ---
 
@@ -120,6 +126,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 ## Project-Specific Rules
 
 - **Math correctness:** Test 4D rotations carefully. Quaternion vs. matrix representation choice will impact implementation.
+- **Gamepedia maintenance:** When adding or changing features, update the corresponding `GAMEPEDIA_CONTENT` entries in `main.py` to keep the in-game encyclopedia accurate. Also update `tests/test_gamepedia.py` if topic structure changes (group/topic counts).
 - **No commits without explicit request.** (Standard rule applies.)
 - **Iterative:** Expect this to evolve — start with basic traversal, then refine projection/rendering.
 

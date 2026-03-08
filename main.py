@@ -319,6 +319,247 @@ list_start_y = 100  # Y coordinate where point list items begin (updated each fr
 search_text = ""
 search_active = False
 
+# Gamepedia state
+gamepedia_open = False
+gamepedia_selected_topic = 0
+gamepedia_scroll = 0
+
+# Gamepedia layout constants (shared between click handling and rendering)
+GP_LEFT_X = 40
+GP_LEFT_W = 280
+GP_TOP_Y = 56
+GP_LINE_H = 24
+
+GAMEPEDIA_CONTENT = [
+    ("Controls", [
+        ("Keyboard", """\
+WASD  Rotate your view up/down/left/right
+Q/E   Rotate along the 4th axis (the "depth" you can't normally see)
+V     Switch coloring mode (4 modes — see View Modes)
+Tab   Jump to the closest unvisited point
+/ F   Open the name search bar
+F1    Open/close this screen
+Ctrl +/-  Zoom in XYZ projection modes"""),
+        ("Mouse", """\
+Click a point in the viewport to fly there. Hold-click to open the \
+radial menu instead.
+
+Click a name in the sidebar to fly to that point.
+
+Drag anywhere in the viewport to rotate your view freely.
+
+Mouse wheel zooms when in XYZ projection modes (2 and 3)."""),
+        ("View Modes", """\
+Press V to cycle through four coloring modes:
+
+Assigned: Every point keeps one random color forever. Good for \
+recognizing individual points at a glance.
+
+4D Position: Color is computed from the direction to each point in \
+4D space. Nearby points look similar; far-away points look different.
+
+XYZ Projection: Points are plotted by their 3D position relative to \
+you. The hidden 4th coordinate (W) becomes a blue-to-white-to-red \
+color gradient. Scroll to zoom.
+
+XYZ Fixed-Y: Same as XYZ Projection, but the vertical axis is locked \
+to an absolute "up" direction instead of rotating with you."""),
+    ]),
+    ("Navigation", [
+        ("Travel & Slerp", """\
+Click any point to travel to it. You don't fly in a straight line — \
+you slide along the curved surface of the 4-sphere, following the \
+shortest path (a "great circle arc"). This curved motion is called \
+slerp (spherical linear interpolation).
+
+When you get close enough (within 0.02 rad), you snap onto the point \
+and a blue ring pops outward to confirm arrival.
+
+Your entire view frame travels with you, so the camera smoothly \
+rotates as you move. Nothing jumps or flickers."""),
+        ("Travel Queue", """\
+Already flying somewhere? Click another point to queue it up. You'll \
+automatically continue to the queued destination after arriving.
+
+The sidebar marks your current target with < and your queued target \
+with << in blue."""),
+        ("Auto-Travel (Tab)", """\
+Press Tab to auto-travel to the nearest visible point you haven't \
+visited yet. If you're mid-flight, it queues instead.
+
+Visited points are tracked for the whole session. The sidebar dims \
+points you've already been to, and a trail of fading dots shows your \
+recent path through the viewport."""),
+        ("Search & Filter", """\
+Press / or F to open the search bar at the top of the sidebar. Start \
+typing a name and the list filters in real-time (case-insensitive, \
+prefix match).
+
+Press Escape to clear the filter and close the search bar. You can \
+still scroll the filtered list with UP/DOWN while typing."""),
+    ]),
+    ("World", [
+        ("Points & Names", """\
+There are 30,000 points scattered uniformly across the surface of \
+the 4-sphere. Each one has a unique name built from syllable chunks — \
+a core, an ending, sometimes a suffix or number. The name space holds \
+11.8 million possibilities, so every point gets something distinct.
+
+Names are generated from a fixed random seed (42), so they're always \
+the same between sessions."""),
+        ("Planet Types", """\
+Each point is drawn as a tiny planet sprite. There are 10 types:
+
+Earth, Mars, Jupiter, Frost, Inferno, Desert, Jungle, Methane, \
+Saturn, and Void.
+
+Which type a point gets is determined by a hash of its index — always \
+the same point, always the same planet. The detail panel (hold-click \
+> Info) shows a bigger version with a random rotation and mirror flip \
+unique to that point."""),
+        ("Colors & View Modes", """\
+In Assigned mode every point picks a random HSV color at startup and \
+keeps it forever. In 4D Position mode, the color is computed from the \
+relative direction vector in 4D — similar directions get similar hues.
+
+In the two XYZ modes, the 4th coordinate (W) maps to a gradient: \
+blue for negative W, white near zero, red for positive.
+
+Whichever mode you're in, the sidebar, tooltip, and detail panel all \
+use the exact same color as the viewport dot."""),
+        ("Identicons", """\
+Every point has a small pixel-art avatar (identicon) generated from \
+its name hash. You'll see it in the sidebar next to each name, in \
+hover tooltips, and at large size in the detail panel.
+
+They also have googly eyes that follow your mouse cursor."""),
+    ]),
+    ("Audio", [
+        ("Procedural Music", """\
+Every point emits its own ambient sound — a 15-second looping \
+soundscape generated entirely from its name key. No two points sound \
+the same. There are over 2 million possible combinations of timbre, \
+scale, root note, and tempo.
+
+You can only hear points within 10 mrad of your position. Volume \
+fades linearly as you move away, so traveling through a cluster of \
+points creates a shifting mix."""),
+        ("Timbres & Scales", """\
+Each point's sound picks one of 10 timbres: supersaw pad, acid bass, \
+synth pluck, FM bass, noise drone, ring modulation, pulse-width \
+modulation, organ, wavefold, or stutter.
+
+The melody follows one of 12 scales (pentatonic, dorian, blues, \
+harmonic minor, etc.) with a root note anywhere from a deep 33 Hz \
+rumble up to a bright 466 Hz tone. Tempo ranges from a slow drone \
+(5 seconds per note) to rapid pulses (0.08 seconds)."""),
+        ("Spatial Mixing", """\
+As you fly around, sounds crossfade naturally — nearby points get \
+louder, distant ones disappear. Each loop crossfades its own start \
+and end so there's no click or gap.
+
+High harmonics roll off above 580 Hz to keep everything warm and \
+blendable. All loops are volume-normalized so no single point blasts \
+over the others."""),
+    ]),
+    ("4D Geometry", [
+        ("What is S3?", """\
+S3 is the "3-sphere" — the 4D equivalent of a regular sphere. Just \
+as a normal sphere (S2) is the set of all points at distance 1 from \
+the center in 3D space, S3 is the set of all points at distance 1 \
+from the center in 4D space:
+
+  x*x + y*y + z*z + w*w = 1
+
+It's a closed, finite 3D space with no edges or boundaries. If you \
+travel in any direction long enough, you come back to where you started \
+— like walking around the Earth, but in one more dimension.
+
+S3 shows up in physics (quaternion rotations, particle spin states) \
+and topology. This explorer lets you actually walk around on it."""),
+        ("Tangent Space Projection", """\
+You can't see 4D directly, so the game projects everything onto a \
+flat screen. Here's how:
+
+At your position on S3, there's a 3D "tangent plane" — the flat space \
+that just barely touches the sphere at that point (like a table \
+touching a basketball). The camera uses three perpendicular direction \
+vectors in this tangent plane as its local X/Y/Z axes.
+
+Nearby points get projected onto these axes, giving 3D coordinates \
+that get drawn on screen. Points farther away in angular distance \
+appear smaller and dimmer — like depth fog, but on a curved surface."""),
+        ("Orientation Frame", """\
+Your camera state is stored as four 4D vectors bundled into a matrix:
+
+Row 0: your position on S3 (a unit vector in 4D).
+Rows 1-3: three perpendicular directions in the tangent plane (your \
+local right, up, and "into the screen" axes).
+
+When you press WASD or QE, the game rotates your position and one \
+of these axes together in a 2D plane — that's how you turn without \
+leaving the sphere's surface.
+
+After each rotation, Gram-Schmidt correction keeps all four vectors \
+exactly perpendicular and unit-length, preventing drift from piling \
+up over thousands of frames."""),
+    ]),
+    ("UI", [
+        ("Sidebar", """\
+The right panel lists every visible point, sorted nearest-first. Each \
+row shows the point's identicon, name, and distance (in milliradians \
+for close points, radians for far ones).
+
+Scroll with UP/DOWN. Click any row to fly there. Already-visited \
+points appear dimmed. The header shows how many points are visible \
+and how many you've visited this session."""),
+        ("Tooltip", """\
+Hover your mouse over any point in the viewport to see a floating \
+tooltip with the point's identicon, name, and distance. The border \
+color matches the point's display color in the current view mode.
+
+Hovering a name in the sidebar highlights the matching point in the \
+viewport with a white circle outline."""),
+        ("Detail Panel & Radial Menu", """\
+Hold-click (don't release immediately) on a point to pop open a \
+radial menu. Move to the "Info" wedge and release to open the detail \
+panel.
+
+The panel shows a large planet sprite and identicon, the point's \
+name, exact distance, full 4D coordinates (x, y, z, w), and its \
+audio parameters: which timbre and scale it uses, root frequency, \
+and tempo.
+
+Click anywhere else to dismiss the panel."""),
+    ]),
+]
+
+# Flatten topics for indexed access: list of (group_name, title, text)
+_gamepedia_flat = []
+for _gname, _topics in GAMEPEDIA_CONTENT:
+    for _title, _text in _topics:
+        _gamepedia_flat.append((_gname, _title, _text))
+
+
+def word_wrap_text(text, max_width, render_font):
+    """Split text into lines that fit within max_width pixels."""
+    lines = []
+    for paragraph in text.split("\n"):
+        if not paragraph:
+            lines.append("")
+            continue
+        words = paragraph.split(" ")
+        current = words[0]
+        for word in words[1:]:
+            test = current + " " + word
+            if render_font.size(test)[0] <= max_width:
+                current = test
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+    return lines
+
 
 def apply_search_filter(search_query):
     """Filter visible_indices by name prefix match.
@@ -363,41 +604,42 @@ while running:
     # Handle input
     keys = pygame.key.get_pressed()
 
-    # Camera rotation via persistent orientation frame
-    rotation_speed = ROTATION_SPEED
-    if view_mode == 3:
-        # XYZ Fixed-Y: only horizontal pan (A/D), Y stays locked to absolute [0,1,0,0]
-        if keys[pygame.K_a]:
-            rotate_frame_tangent(orientation, 1, 3, -rotation_speed)
-        if keys[pygame.K_d]:
-            rotate_frame_tangent(orientation, 1, 3, rotation_speed)
-    elif view_mode == 2:
-        # XYZ view: rotate tangent basis only (camera stays fixed)
-        if keys[pygame.K_w]:  # tilt up (row 1, row 2 plane)
-            rotate_frame_tangent(orientation, 1, 2, -rotation_speed)
-        if keys[pygame.K_s]:  # tilt down
-            rotate_frame_tangent(orientation, 1, 2, rotation_speed)
-        if keys[pygame.K_a]:  # pan left (row 1, row 3 plane)
-            rotate_frame_tangent(orientation, 1, 3, -rotation_speed)
-        if keys[pygame.K_d]:  # pan right
-            rotate_frame_tangent(orientation, 1, 3, rotation_speed)
-        if keys[pygame.K_q]:  # roll (row 2, row 3 plane)
-            rotate_frame_tangent(orientation, 2, 3, rotation_speed)
-        if keys[pygame.K_e]:  # roll opposite
-            rotate_frame_tangent(orientation, 2, 3, -rotation_speed)
-    else:
-        if keys[pygame.K_w]:  # rotate up (screen Y)
-            rotate_frame(orientation, 2, -rotation_speed)
-        if keys[pygame.K_s]:  # rotate down
-            rotate_frame(orientation, 2, rotation_speed)
-        if keys[pygame.K_a]:  # rotate left (screen X)
-            rotate_frame(orientation, 1, -rotation_speed)
-        if keys[pygame.K_d]:  # rotate right
-            rotate_frame(orientation, 1, rotation_speed)
-        if keys[pygame.K_q]:  # rotate in 4D depth
-            rotate_frame(orientation, 3, rotation_speed)
-        if keys[pygame.K_e]:  # rotate in 4D depth (opposite)
-            rotate_frame(orientation, 3, -rotation_speed)
+    if not gamepedia_open:
+        # Camera rotation via persistent orientation frame
+        rotation_speed = ROTATION_SPEED
+        if view_mode == 3:
+            # XYZ Fixed-Y: only horizontal pan (A/D), Y stays locked to absolute [0,1,0,0]
+            if keys[pygame.K_a]:
+                rotate_frame_tangent(orientation, 1, 3, -rotation_speed)
+            if keys[pygame.K_d]:
+                rotate_frame_tangent(orientation, 1, 3, rotation_speed)
+        elif view_mode == 2:
+            # XYZ view: rotate tangent basis only (camera stays fixed)
+            if keys[pygame.K_w]:  # tilt up (row 1, row 2 plane)
+                rotate_frame_tangent(orientation, 1, 2, -rotation_speed)
+            if keys[pygame.K_s]:  # tilt down
+                rotate_frame_tangent(orientation, 1, 2, rotation_speed)
+            if keys[pygame.K_a]:  # pan left (row 1, row 3 plane)
+                rotate_frame_tangent(orientation, 1, 3, -rotation_speed)
+            if keys[pygame.K_d]:  # pan right
+                rotate_frame_tangent(orientation, 1, 3, rotation_speed)
+            if keys[pygame.K_q]:  # roll (row 2, row 3 plane)
+                rotate_frame_tangent(orientation, 2, 3, rotation_speed)
+            if keys[pygame.K_e]:  # roll opposite
+                rotate_frame_tangent(orientation, 2, 3, -rotation_speed)
+        else:
+            if keys[pygame.K_w]:  # rotate up (screen Y)
+                rotate_frame(orientation, 2, -rotation_speed)
+            if keys[pygame.K_s]:  # rotate down
+                rotate_frame(orientation, 2, rotation_speed)
+            if keys[pygame.K_a]:  # rotate left (screen X)
+                rotate_frame(orientation, 1, -rotation_speed)
+            if keys[pygame.K_d]:  # rotate right
+                rotate_frame(orientation, 1, rotation_speed)
+            if keys[pygame.K_q]:  # rotate in 4D depth
+                rotate_frame(orientation, 3, rotation_speed)
+            if keys[pygame.K_e]:  # rotate in 4D depth (opposite)
+                rotate_frame(orientation, 3, -rotation_speed)
 
     reorthogonalize_frame(orientation)
     camera_pos = orientation[0]
@@ -410,18 +652,30 @@ while running:
     filtered_distances = [vis_dist_map[idx] for idx in filtered_indices]
 
     # List scrolling
-    item_height = 40
-    max_items = (SCREEN_HEIGHT - list_start_y) // item_height
-    if keys[pygame.K_UP]:
-        list_scroll = max(0, list_scroll - 1)
-    if keys[pygame.K_DOWN]:
-        list_scroll = min(max(0, len(filtered_indices) - max_items), list_scroll + 1)
+    if not gamepedia_open:
+        item_height = 40
+        max_items = (SCREEN_HEIGHT - list_start_y) // item_height
+        if keys[pygame.K_UP]:
+            list_scroll = max(0, list_scroll - 1)
+        if keys[pygame.K_DOWN]:
+            list_scroll = min(max(0, len(filtered_indices) - max_items), list_scroll + 1)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.KEYDOWN:
-            if search_active:
+            if gamepedia_open:
+                if event.key == pygame.K_F1 or event.key == pygame.K_ESCAPE:
+                    gamepedia_open = False
+                elif event.key == pygame.K_UP:
+                    gamepedia_selected_topic = max(0, gamepedia_selected_topic - 1)
+                    gamepedia_scroll = 0
+                elif event.key == pygame.K_DOWN:
+                    gamepedia_selected_topic = min(len(_gamepedia_flat) - 1, gamepedia_selected_topic + 1)
+                    gamepedia_scroll = 0
+            elif event.key == pygame.K_F1:
+                gamepedia_open = True
+            elif search_active:
                 if event.key == pygame.K_ESCAPE:
                     search_text = ""
                     search_active = False
@@ -452,13 +706,30 @@ while running:
                     if pygame.key.get_mods() & pygame.KMOD_CTRL and view_mode in (2, 3):
                         xyz_zoom = max(0.1, xyz_zoom / 1.25)
         elif event.type == pygame.MOUSEWHEEL:
-            if view_mode in (2, 3):
+            if gamepedia_open:
+                gamepedia_scroll = max(0, gamepedia_scroll - event.y * 3)
+            elif view_mode in (2, 3):
                 if event.y > 0:
                     xyz_zoom *= 1.15
                 elif event.y < 0:
                     xyz_zoom = max(0.1, xyz_zoom / 1.15)
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:  # Left click
+            if gamepedia_open:
+                if event.button == 1:
+                    mx, my = event.pos
+                    # Left panel click: select topic
+                    if GP_LEFT_X <= mx <= GP_LEFT_X + GP_LEFT_W and my >= GP_TOP_Y:
+                        y_cursor = GP_TOP_Y
+                        flat_idx = 0
+                        for gname, topics in GAMEPEDIA_CONTENT:
+                            y_cursor += GP_LINE_H  # group header
+                            for title, _text in topics:
+                                if y_cursor <= my < y_cursor + GP_LINE_H:
+                                    gamepedia_selected_topic = flat_idx
+                                    gamepedia_scroll = 0
+                                y_cursor += GP_LINE_H
+                                flat_idx += 1
+            elif event.button == 1:  # Left click
                 mx, my = event.pos
                 # Dismiss detail panel on click outside it
                 if inspected_point_idx is not None and menu_state == "idle":
@@ -482,7 +753,7 @@ while running:
                         menu_hold_start = pygame.time.get_ticks()
                         menu_point_idx = best_idx
                         menu_center = best_p2d.astype(int)
-        elif event.type == pygame.MOUSEBUTTONUP:
+        elif event.type == pygame.MOUSEBUTTONUP and not gamepedia_open:
             if event.button == 1:  # Left click release
                 mx, my = event.pos
                 if menu_state == "menu_open":
@@ -562,7 +833,7 @@ while running:
                             travel_progress = 0.0
                             pop_animation_idx = None
                             pop_animation_start_time = None
-        elif event.type == pygame.MOUSEMOTION:
+        elif event.type == pygame.MOUSEMOTION and not gamepedia_open:
             mx, my = event.pos
             if mx > SCREEN_WIDTH - 300:
                 item_idx = (my - list_start_y) // 40 + list_scroll
@@ -1195,13 +1466,123 @@ while running:
     status_text = font.render(status, True, TEXT_COLOR)
     screen.blit(status_text, (10, 10))
 
-    controls = [
-        "WASD: Rotate camera | Q/E: Rotate 4D depth | Drag: Rotate camera",
-        "UP/DOWN: Scroll list | Click: Travel | Tab: Auto-travel unvisited | V: Toggle view",
-    ]
-    for i, ctrl in enumerate(controls):
-        ctrl_text = font.render(ctrl, True, (150, 150, 150))
-        screen.blit(ctrl_text, (10, 30 + i * 20))
+    # Gamepedia overlay
+    if gamepedia_open:
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 10, 20, 230))
+        screen.blit(overlay, (0, 0))
+
+        # Group accent colors
+        _gp_group_colors = {
+            "Controls": (100, 180, 255),
+            "Navigation": (100, 220, 160),
+            "World": (220, 180, 100),
+            "Audio": (200, 130, 220),
+            "4D Geometry": (255, 130, 120),
+            "UI": (140, 200, 220),
+        }
+
+        # Title
+        title_font = pygame.font.Font(None, 28)
+        title_surf = title_font.render("GAMEPEDIA", True, (200, 220, 255))
+        screen.blit(title_surf, (SCREEN_WIDTH // 2 - title_surf.get_width() // 2, 16))
+
+        # Subtle divider under title
+        pygame.draw.line(screen, (60, 70, 100), (40, 46), (SCREEN_WIDTH - 40, 46))
+
+        # Layout (uses GP_ constants for left panel)
+        left_x = GP_LEFT_X
+        left_w = GP_LEFT_W
+        right_x = left_x + left_w + 20
+        right_w = SCREEN_WIDTH - right_x - 40
+        top_y = GP_TOP_Y
+        line_h = GP_LINE_H
+
+        # Left panel background
+        left_bg = pygame.Surface((left_w + 8, SCREEN_HEIGHT - top_y - 36), pygame.SRCALPHA)
+        left_bg.fill((20, 22, 35, 120))
+        screen.blit(left_bg, (left_x - 4, top_y))
+
+        # Vertical divider between panels
+        pygame.draw.line(screen, (50, 55, 80), (left_x + left_w + 10, top_y), (left_x + left_w + 10, SCREEN_HEIGHT - 36))
+
+        # Left panel: grouped topic list
+        y_cursor = top_y
+        flat_idx = 0
+        for gname, topics in GAMEPEDIA_CONTENT:
+            accent = _gp_group_colors.get(gname, (140, 160, 200))
+            # Group header with darkened accent bg + bar
+            header_bg = (accent[0] // 6 + 10, accent[1] // 6 + 10, accent[2] // 6 + 15)
+            pygame.draw.rect(screen, header_bg, (left_x - 4, y_cursor, left_w, line_h))
+            pygame.draw.line(screen, accent, (left_x - 4, y_cursor), (left_x - 4, y_cursor + line_h - 1), 3)
+            header_surf = font.render(gname.upper(), True, accent)
+            screen.blit(header_surf, (left_x + 4, y_cursor + 5))
+            y_cursor += line_h
+            for title, _text in topics:
+                if flat_idx == gamepedia_selected_topic:
+                    # Selected: accent-tinted highlight
+                    sel_color = (accent[0] // 4 + 20, accent[1] // 4 + 20, accent[2] // 4 + 30)
+                    sel_rect = pygame.Rect(left_x - 4, y_cursor, left_w, line_h)
+                    pygame.draw.rect(screen, sel_color, sel_rect, border_radius=3)
+                    pygame.draw.rect(screen, accent, sel_rect, 1, border_radius=3)
+                    color = (255, 255, 255)
+                else:
+                    color = (180, 180, 200)
+                topic_surf = font.render(f"  {title}", True, color)
+                screen.blit(topic_surf, (left_x, y_cursor + 4))
+                y_cursor += line_h
+                flat_idx += 1
+
+        # Right panel: selected topic content
+        if 0 <= gamepedia_selected_topic < len(_gamepedia_flat):
+            gname, title, text = _gamepedia_flat[gamepedia_selected_topic]
+            accent = _gp_group_colors.get(gname, (180, 200, 255))
+
+            # Topic title with accent
+            topic_title_font = pygame.font.Font(None, 22)
+            tt_surf = topic_title_font.render(title, True, accent)
+            group_surf = font.render(f"{gname}  >", True, (100, 110, 140))
+            screen.blit(group_surf, (right_x, top_y + 3))
+            screen.blit(tt_surf, (right_x + group_surf.get_width() + 6, top_y))
+            # Accent underline
+            pygame.draw.line(screen, (*accent, 80), (right_x, top_y + 22), (right_x + right_w, top_y + 22))
+
+            # Word-wrapped content
+            content_y = top_y + 32
+            wrapped = word_wrap_text(text, right_w, font)
+            content_line_h = 18
+            visible_lines = (SCREEN_HEIGHT - content_y - 36) // content_line_h
+
+            # Clamp scroll
+            max_scroll = max(0, len(wrapped) - visible_lines)
+            gamepedia_scroll = min(gamepedia_scroll, max_scroll)
+
+            # Tint for emphasis lines (lines that look like "Key  Value" or start with a keyword)
+            body_color = (200, 200, 210)
+            emphasis_color = (accent[0] // 2 + 100, accent[1] // 2 + 100, accent[2] // 2 + 100)
+
+            for li, line in enumerate(wrapped[gamepedia_scroll:gamepedia_scroll + visible_lines]):
+                # Highlight lines that are key-value style (contain multiple consecutive spaces)
+                if "  " in line and not line.startswith(" "):
+                    # Render key part in accent, value part in body
+                    parts = line.split("  ", 1)
+                    key_surf = font.render(parts[0], True, emphasis_color)
+                    val_surf = font.render("  " + parts[1], True, body_color)
+                    screen.blit(key_surf, (right_x, content_y + li * content_line_h))
+                    screen.blit(val_surf, (right_x + key_surf.get_width(), content_y + li * content_line_h))
+                else:
+                    line_surf = font.render(line, True, body_color)
+                    screen.blit(line_surf, (right_x, content_y + li * content_line_h))
+
+            # Scroll indicator
+            if len(wrapped) > visible_lines:
+                indicator = f"[{gamepedia_scroll + 1}-{min(gamepedia_scroll + visible_lines, len(wrapped))}/{len(wrapped)}]"
+                ind_surf = font.render(indicator, True, (120, 120, 140))
+                screen.blit(ind_surf, (right_x + right_w - ind_surf.get_width(), SCREEN_HEIGHT - 24))
+
+        # Help hint
+        hint = font.render("F1/ESC: Close | UP/DOWN: Topics | Scroll: Content", True, (100, 100, 120))
+        screen.blit(hint, (SCREEN_WIDTH // 2 - hint.get_width() // 2, SCREEN_HEIGHT - 24))
 
     pygame.display.flip()
 

@@ -34,9 +34,9 @@
 | **W / S** | Rotate up / down |
 | **A / D** | Rotate left / right |
 | **Q / E** | Rotate in 4D depth |
-| **V** | Toggle color mode (Assigned / 4D Position) |
+| **V** | Cycle view mode (Assigned / 4D Position / XYZ Projection / XYZ Fixed-Y) |
 | **Up / Down** | Scroll the point list |
-| **Mouse drag** | Rotate camera |
+| **Ctrl +/-** or **scroll** | Zoom (XYZ modes only) |
 | **Left click** (viewport) | Travel to nearest point |
 | **Left click** (sidebar) | Travel to selected point |
 
