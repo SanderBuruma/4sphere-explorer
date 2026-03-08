@@ -60,7 +60,7 @@ GAME_SEED = 42
 ARRIVAL_THRESHOLD = 0.0005  # radians (0.5 mrad) — snap to target when this close
 CAMERA_OFFSET = 0.08  # radians — camera orbital distance from player
 ROTATION_SPEED = 0.02  # radians per frame for WASD/QE
-TRAVEL_SPEED = 0.000008  # slerp progress per frame
+TRAVEL_SPEED = 0.00008  # slerp progress per frame
 POP_DURATION = 400  # milliseconds for arrival pop animation
 TRIANGLE_PERIOD = 6000.0  # milliseconds for one full triangle rotation
 

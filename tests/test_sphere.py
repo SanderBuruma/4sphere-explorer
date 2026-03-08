@@ -30,7 +30,7 @@ from sphere import (
 
 NUM_POINTS = 30_000
 FOV_ANGLE = 0.116
-TRAVEL_SPEED = 0.000008
+TRAVEL_SPEED = 0.00008
 ARRIVAL_THRESHOLD = 0.002
 OLD_TRAVEL_SPEED = 0.00004
 
@@ -58,9 +58,9 @@ class TestScaleConstraints(unittest.TestCase):
         self.assertGreater(avg, 8.0, f"Average visible {avg:.2f} is below 8")
         self.assertLess(avg, 12.0, f"Average visible {avg:.2f} exceeds 12")
 
-    def test_travel_speed_5x_slower(self):
-        """Verify travel speed is 5x slower than before."""
-        self.assertAlmostEqual(TRAVEL_SPEED, OLD_TRAVEL_SPEED / 5, places=8)
+    def test_travel_speed_2x_faster(self):
+        """Verify travel speed is 2x faster than old speed."""
+        self.assertAlmostEqual(TRAVEL_SPEED, OLD_TRAVEL_SPEED * 2, places=8)
 
 
 class TestNameGeneration(unittest.TestCase):
