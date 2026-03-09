@@ -60,7 +60,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - `main.py` — Game loop, rendering, UI, input handling, mutable game state
 - `lib/constants.py` — Display/color/game constants, `distance_to_color()`, `format_dist()`
 - `lib/gamepedia.py` — Gamepedia content, layout constants (`GP_*`), `word_wrap_text()`
-- `lib/graphics.py` — Identicon generation, googly eyes
+- `lib/graphics.py` — Procedural creature generation (low-poly faceted bodies, appendages, accent markings, eyes)
 - `lib/planets.py` — Procedural rotating planet generation (two-tier equirect textures, hemisphere rendering, background preload worker)
 - `sphere.py` — S³ math (point generation, distance, slerp, tangent space projection, orientation frame rotation, name decoding, colors)
 - `audio.py` — Procedural techno ambient music (synthesis, caching, proximity-based playback)
@@ -78,7 +78,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - **Camera distance:** 0.08 rad from player (reduced from 0.15 for tight framing)
 
 ### Features
-- **Lazy identicon generation:** 32×32 identicons cached on-demand with LRU eviction, never all 30k at startup
+- **Procedural creatures:** Each point has a unique creature avatar with a low-poly faceted body (Delaunay triangulation), appendages (horns, fins, limbs, spikes), accent-colored markings (spots, dorsal ridge, belly, patches), and eyes. 32×32 cached on-demand with LRU eviction. Generated from name key seed via `generate_creature(seed, size)` for any resolution
 - **Lazy name generation:** 11.8M unique name space (4 regions: core+end+suffix+number, core+end+suffix, core+suffix+number, core+suffix). Numbers always appended after word suffixes, never replacing them. Keys sampled once at startup, decoded deterministically per point
 - **Tangent space projection:** Points projected into camera's local tangent plane, so visible points cluster around crosshair
 - **Procedural rotating planets:** Each point is a unique procedurally generated planet with smooth gradient noise textures (12 color palettes, seeded by name key). Planets rotate (20s period, per-point phase offset). Two-tier textures: low-res (32×64) for main view (max 6 per frame), high-res (128×256) preloaded on background thread for all visible points. Hemisphere rendered via normalized UV lookup with edge darkening and highlight shading. Falls back to circles for uncached planets
@@ -92,7 +92,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
   - Travel completes at 0.02 rad proximity (snap to target) → pop animation (400ms expanding fade-out circle)
   - Travel target marked with `<` in list and 3 rotating blue triangles in view (6s rotation)
   - **Travel queue:** Clicking a new target while traveling queues it; travel starts after arriving at current target. Queued target shown with `<<` in list (blue)
-- **UI:** Crosshair at camera position, scrollable distance-sorted list with point colors, hover tooltips with identicons
+- **UI:** Crosshair at camera position, scrollable distance-sorted list with point colors, hover tooltips with creature avatars
 - **Detail panel:** Radial menu "Info" option shows large (64×64) rotating planet with tint color, plus name, distance, 4D coordinates, and audio parameters
 - **Gamepedia (F1):** In-game encyclopedia overlay. Left panel lists topics grouped by category (Controls, Navigation, World, Audio, 4D Geometry, UI) with per-group accent colors. Right panel shows word-wrapped scrollable content. Click topics or use UP/DOWN to navigate, mouse wheel to scroll content. All game input suppressed while open. Layout constants (`GP_LEFT_X`, `GP_LEFT_W`, `GP_TOP_Y`, `GP_LINE_H`) shared between click handler and renderer. Content in `GAMEPEDIA_CONTENT` must be kept up to date when features change.
 - **Distance display:** mrad for distances < 1 rad, rad for >= 1 rad
@@ -119,7 +119,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - **Persistent orientation frame:** 4×4 orthogonal matrix (row 0 = camera, rows 1-3 = tangent basis). `rotate_frame()` applies exact planar rotations in the (camera, basis[i]) plane, co-rotating camera and tangent vectors. `reorthogonalize_frame()` corrects numerical drift via Gram-Schmidt from current frame vectors (not fixed standard basis), preserving orientation continuity. This replaces the old per-frame Gram-Schmidt approach which caused direction flipping when the camera moved away from standard basis axes.
 - **Tangent space projection:** 3 orthonormal basis vectors from orientation frame, perpendicular to camera in ℝ⁴, points projected onto basis scaled by angular distance
 - **Name key sampling:** `np.random.choice(TOTAL_NAMES, 30000, replace=False)` at startup with fixed seed (42) ensures deterministic, collision-free 30k unique names from 11.8M name space
-- **Lazy caching:** Identicons, names, and planet textures cached separately with LRU eviction in `update_visible()` to keep memory bounded
+- **Lazy caching:** Creatures, names, and planet textures cached separately with LRU eviction in `update_visible()` to keep memory bounded
 - **Planet rendering pipeline:** Two-tier: `generate_equirect_texture(seed, h, w)` produces uint8 arrays via vectorized Perlin noise (`_perlin3_batch` numpy fallback when C `noise` lib unavailable) + gradient LUT. Low-res (32×64) generated on main thread (budget 6/frame), high-res (128×256) generated by background worker thread for all visible points (queue-based, 100 entry cache cap ~10MB). `render_planet_frame()` samples hemisphere via normalized UV arrays (resolution-independent, bilinear for ≥48px). Tint via `BLEND_MULT` preserves point color identity
 - **Travel completion:** Snaps to target at < 0.02 rad proximity, fires pop animation. If a queued target exists, immediately begins traveling to it
 - **Audio synthesis:** `generate_signal()` returns raw float64 array (testable without pygame). `generate_sound()` wraps it into a `pygame.mixer.Sound`. Ten timbre functions each take `(freq, t, rng, tempo_range)`. `_rolloff(h)` attenuates harmonics linearly between 580–700 Hz to keep energy warm. Acid resonance uses proper phase accumulation (`np.cumsum`) instead of `freq*t`. Ring mod filters ratios to keep both sum and difference frequencies below 580 Hz, with full sideband suppression above. DC offset removed before RMS normalization to target 0.25. `update_audio()` manages channel allocation per frame based on proximity

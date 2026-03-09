@@ -2,11 +2,9 @@ import pygame
 import numpy as np
 import math
 from collections import deque
-from io import BytesIO
-from pydenticon import Generator
 from audio import init_audio, update_audio, cleanup_audio, get_audio_params
 from lib.constants import *
-from lib.graphics import draw_googly_eyes, get_identicon
+from lib.graphics import get_creature, generate_creature, draw_creature_eyes
 from lib.planets import (
     get_planet_equirect, get_planet_equirect_hires, request_hires_preload,
     update_hires_preload_queue, render_planet_frame, get_planet_rotation_angle,
@@ -43,11 +41,8 @@ init_audio()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("4-Sphere Explorer")
 
-# Generate window icon from game name
-icon_generator = Generator(8, 8, foreground=["#3498db", "#e74c3c", "#2ecc71"], background="#000000")
-icon_bytes = icon_generator.generate("4-Sphere", 64, 64, inverted=False)
-icon_surface = pygame.image.load(BytesIO(icon_bytes))
-pygame.display.set_icon(icon_surface)
+# Generate window icon
+pygame.display.set_icon(generate_creature(42, size=64)[0])
 
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 14)
@@ -88,7 +83,7 @@ def get_name(idx):
 point_colors = random_color(NUM_POINTS)  # Assign random colors
 
 # Lazy identicon cache: idx -> pygame Surface
-point_identicon_cache = {}
+point_creature_cache = {}
 
 traveling = False
 travel_target = None
@@ -193,7 +188,7 @@ def apply_search_filter(search_query):
 
 # Precompute visible points and distances
 def update_visible():
-    global visible_indices, visible_distances, point_identicon_cache
+    global visible_indices, visible_distances, point_creature_cache
     prev_set = set(visible_indices)  # cache state before update
 
     # Use KDTree for sub-linear visibility query
@@ -207,7 +202,7 @@ def update_visible():
     new_set = set(visible_indices)
     evicted = prev_set - new_set
     for idx in evicted:
-        point_identicon_cache.pop(idx, None)
+        point_creature_cache.pop(idx, None)
         point_name_cache.pop(idx, None)
     evict_planet_cache(evicted)
 
@@ -833,9 +828,9 @@ while running:
         label = f"{name} ({format_dist(h_dist)})"
         label_surface = font.render(label, True, TEXT_COLOR)
         label_rect = label_surface.get_rect()
-        identicon = get_identicon(h_idx, point_identicon_cache, get_name(h_idx), point_colors[h_idx])
+        creature, creature_eyes = get_creature(h_idx, point_creature_cache, _name_keys[h_idx])
 
-        # Total width: identicon (32px) + gap (4px) + label
+        # Total width: creature (32px) + gap (4px) + label
         tooltip_width = 32 + 4 + label_rect.width
         tooltip_height = max(32, label_rect.height)
 
@@ -855,10 +850,10 @@ while running:
         pygame.draw.rect(screen, (30, 30, 50), bg_rect)
         pygame.draw.rect(screen, point_display_colors.get(h_idx, TEXT_COLOR), bg_rect, 1)
 
-        # Draw identicon and label
+        # Draw creature and label
         ident_y = ty + (tooltip_height - 32) // 2
-        screen.blit(identicon, (tx, ident_y))
-        draw_googly_eyes(screen, tx, ident_y, pygame.mouse.get_pos())
+        screen.blit(creature, (tx, ident_y))
+        draw_creature_eyes(screen, tx, ident_y, 32, creature_eyes, (mx, my))
         screen.blit(label_surface, (tx + 32 + 4, ty + (tooltip_height - label_rect.height) // 2))
 
     # Draw radial menu
@@ -934,10 +929,10 @@ while running:
             line_height = 16
             padding = 8
             sprite_size = 64
-            identicon_size = 64
-            top_row_h = identicon_size
+            creature_size = 64
+            top_row_h = creature_size
             max_w = max(font.size(line)[0] for line in lines)
-            panel_w = max(max_w + padding * 2, identicon_size + padding * 3 + sprite_size)
+            panel_w = max(max_w + padding * 2, creature_size + padding * 3 + sprite_size)
             panel_h = top_row_h + padding * 3 + len(lines) * line_height
 
             # Position: offset right and above the anchor point
@@ -960,13 +955,13 @@ while running:
             if equirect is not None:
                 rot = get_planet_rotation_angle(inspected_point_idx, elapsed_ms)
                 planet_surf = render_planet_frame(equirect, sprite_size, rot, tint_color=point_color)
-                panel_surf.blit(planet_surf, (identicon_size + padding * 2, padding))
+                panel_surf.blit(planet_surf, (creature_size + padding * 2, padding))
 
-            # Draw large identicon in top-left with googly eyes
-            large_identicon = pygame.transform.scale(get_identicon(inspected_point_idx, point_identicon_cache, get_name(inspected_point_idx), point_colors[inspected_point_idx]), (identicon_size, identicon_size))
+            # Draw large creature sprite in top-left
+            large_creature, large_eyes = generate_creature(int(_name_keys[inspected_point_idx]), size=creature_size)
             ident_x = padding
             ident_y = padding
-            panel_surf.blit(large_identicon, (ident_x, ident_y))
+            panel_surf.blit(large_creature, (ident_x, ident_y))
 
             # Draw text below sprite/identicon area
             text_y = top_row_h + padding * 2
@@ -978,9 +973,7 @@ while running:
                 panel_surf.blit(lbl, (padding, text_y + li * line_height))
 
             screen.blit(panel_surf, (px, py))
-
-            # Googly eyes on the large identicon
-            draw_googly_eyes(screen, px + padding, py + ident_y, pygame.mouse.get_pos(), scale=2)
+            draw_creature_eyes(screen, px + ident_x, py + ident_y, creature_size, large_eyes, (mx, my))
         else:
             # Inspected point not visible — keep panel state but skip render
             pass
@@ -1042,10 +1035,10 @@ while running:
             item_bg = LIST_ITEM_BG
         pygame.draw.rect(screen, item_bg, (SCREEN_WIDTH - 290, y, 290, item_height))
 
-        # Identicon from point name
-        identicon = get_identicon(point_idx, point_identicon_cache, get_name(point_idx), point_colors[point_idx])
-        screen.blit(identicon, (SCREEN_WIDTH - 285, y + 4))
-        draw_googly_eyes(screen, SCREEN_WIDTH - 285, y + 4, pygame.mouse.get_pos())
+        # Creature sprite from point seed
+        creature, creature_eyes = get_creature(point_idx, point_creature_cache, _name_keys[point_idx])
+        screen.blit(creature, (SCREEN_WIDTH - 285, y + 4))
+        draw_creature_eyes(screen, SCREEN_WIDTH - 285, y + 4, 32, creature_eyes, (mx, my))
 
         # Render name and distance with point's display color
         sidebar_color = point_display_colors.get(point_idx, point_colors[point_idx])

@@ -102,12 +102,12 @@ blue for negative W, white near zero, red for positive.
 
 Whichever mode you're in, the sidebar, tooltip, and detail panel all \
 use the exact same color as the viewport dot."""),
-        ("Identicons", """\
-Every point has a small pixel-art avatar (identicon) generated from \
-its name hash. You'll see it in the sidebar next to each name, in \
-hover tooltips, and at large size in the detail panel.
+        ("Creatures", """\
+Every point has a unique creature avatar. You'll see it in the sidebar \
+next to each name, in hover tooltips, and at large size in the detail panel.
 
-They also have googly eyes that follow your mouse cursor."""),
+Each creature has a distinct body shape, appendages (horns, fins, limbs, \
+spikes), accent-colored markings, and eyes. No two look alike."""),
     ]),
     ("Audio", [
         ("Procedural Music", """\
