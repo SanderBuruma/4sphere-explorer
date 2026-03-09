@@ -2,16 +2,22 @@
 
 Generates a rectangular texture per planet (like unrolling a globe).
 Each frame, shift the longitude to rotate — pure numpy indexing, no noise at runtime.
+
+Two-tier texture system:
+- Low-res (32×64) for main 3D view — fast to generate, good enough for small sprites
+- High-res (128×256) for detail panel — preloaded on background thread
 """
 
 import numpy as np
 import pygame
+import threading
 from scipy.ndimage import map_coordinates
 
 try:
     from noise import snoise3
+    _HAS_C_NOISE = True
 except ImportError:
-    import math as _math
+    _HAS_C_NOISE = False
 
     _PERM = None
 
@@ -35,22 +41,27 @@ except ImportError:
         v = np.where(g < 4, y, np.where((g == 12) | (g == 14), x, z))
         return np.where(g & 1, -u, u) + np.where(g & 2, -v, v)
 
-    def snoise3(x, y, z, octaves=1, persistence=0.5, lacunarity=2.0):
+    def _perlin3_batch(sx, sy, sz, octaves=5, persistence=0.45, lacunarity=2.0):
+        """Vectorized 3D Perlin noise over numpy arrays. No Python per-pixel loop."""
         if _PERM is None:
             _init_perm()
-        val = 0.0
+        p = _PERM
+        val = np.zeros_like(sx, dtype=np.float64)
         amp = 1.0
         freq = 1.0
         for _ in range(octaves):
-            xi, yi, zi = x * freq, y * freq, z * freq
-            X = int(_math.floor(xi)) & 255
-            Y = int(_math.floor(yi)) & 255
-            Z = int(_math.floor(zi)) & 255
-            xf = xi - _math.floor(xi)
-            yf = yi - _math.floor(yi)
-            zf = zi - _math.floor(zi)
-            u, v, w = _fade(xf), _fade(yf), _fade(zf)
-            p = _PERM
+            xi = sx * freq
+            yi = sy * freq
+            zi = sz * freq
+            X = np.floor(xi).astype(np.int32) & 255
+            Y = np.floor(yi).astype(np.int32) & 255
+            Z = np.floor(zi).astype(np.int32) & 255
+            xf = xi - np.floor(xi)
+            yf = yi - np.floor(yi)
+            zf = zi - np.floor(zi)
+            u = _fade(xf)
+            v = _fade(yf)
+            w = _fade(zf)
             A = p[X] + Y; AA = p[A] + Z; AB = p[A + 1] + Z
             B = p[X + 1] + Y; BA = p[B] + Z; BB = p[B + 1] + Z
             val += amp * _lerp(
@@ -123,20 +134,35 @@ GRADIENT_NAMES = [
 # Only useful for gradients where high end = snow/ice.
 POLAR_BIAS = {4: 0.6, 5: 0.7}
 
-# Equirect texture dimensions
+# High-res equirect texture dimensions (detail panel)
 EQUIRECT_H = 128
 EQUIRECT_W = 256
+
+# Low-res equirect texture dimensions (main 3D view)
+EQUIRECT_H_LO = 32
+EQUIRECT_W_LO = 64
 
 # Rotation period (ms for full 360°)
 ROTATION_PERIOD_MS = 60_000
 
-# Cache budget per frame
-MAX_TEXTURES_PER_FRAME = 2
+# Cache budget per frame (higher since low-res is ~16x cheaper)
+MAX_TEXTURES_PER_FRAME = 6
+
+# Max hires textures to keep in memory (~98KB each, 100 = ~10MB)
+MAX_HIRES_CACHE = 100
 
 # Module-level caches
-_equirect_cache = {}   # point_idx -> (EQUIRECT_H, EQUIRECT_W, 3) uint8
-_uv_cache = {}         # render_size -> (inside, lat_idx, lon_idx, shade)
+_equirect_cache = {}     # point_idx -> low-res (EQUIRECT_H_LO, EQUIRECT_W_LO, 3) uint8
+_equirect_cache_hi = {}  # point_idx -> high-res (EQUIRECT_H, EQUIRECT_W, 3) uint8
+_uv_cache = {}           # render_size -> (inside, lat_norm, lon_norm, shade)
 _frame_budget = 0
+
+# Background preload threading
+_preload_lock = threading.Lock()
+_preload_queue = []      # [(point_idx, name_key), ...] — ordered, front = highest priority
+_preload_active = None   # point_idx currently being generated, or None
+_preload_event = threading.Event()  # signals worker that queue has items
+_preload_worker = None   # background thread
 
 
 def _gradient_color(t, stops):
@@ -165,22 +191,24 @@ def _build_gradient_lut(gradient):
     return lut
 
 
-def generate_equirect_texture(seed):
+def generate_equirect_texture(seed, tex_h=EQUIRECT_H, tex_w=EQUIRECT_W):
     """Generate an equirectangular texture for a planet.
 
     Args:
         seed: Integer controlling noise offset and gradient selection.
+        tex_h: Texture height in pixels (default: EQUIRECT_H).
+        tex_w: Texture width in pixels (default: EQUIRECT_W).
 
     Returns:
-        (EQUIRECT_H, EQUIRECT_W, 3) uint8 ndarray.
+        (tex_h, tex_w, 3) uint8 ndarray.
     """
     rng = np.random.RandomState(seed & 0xFFFFFFFF)
     ox, oy, oz = rng.uniform(-1000, 1000, 3)
     gradient = GRADIENTS[seed % len(GRADIENTS)]
     base_scale = 0.8 + rng.uniform(-0.1, 0.3)
 
-    lat = np.linspace(-np.pi / 2, np.pi / 2, EQUIRECT_H)
-    lon = np.linspace(0, 2 * np.pi, EQUIRECT_W, endpoint=False)
+    lat = np.linspace(-np.pi / 2, np.pi / 2, tex_h)
+    lon = np.linspace(0, 2 * np.pi, tex_w, endpoint=False)
     LON, LAT = np.meshgrid(lon, lat)
 
     cos_lat = np.cos(LAT)
@@ -188,15 +216,23 @@ def generate_equirect_texture(seed):
     sy = cos_lat * np.sin(LON)
     sz = np.sin(LAT)
 
-    noise_map = np.zeros((EQUIRECT_H, EQUIRECT_W))
-    for y in range(EQUIRECT_H):
-        for x in range(EQUIRECT_W):
-            noise_map[y, x] = snoise3(
-                sx[y, x] * base_scale + ox,
-                sy[y, x] * base_scale + oy,
-                sz[y, x] * base_scale + oz,
-                octaves=5, persistence=0.45, lacunarity=2.0,
-            )
+    if _HAS_C_NOISE:
+        noise_map = np.zeros((tex_h, tex_w))
+        for y in range(tex_h):
+            for x in range(tex_w):
+                noise_map[y, x] = snoise3(
+                    sx[y, x] * base_scale + ox,
+                    sy[y, x] * base_scale + oy,
+                    sz[y, x] * base_scale + oz,
+                    octaves=5, persistence=0.45, lacunarity=2.0,
+                )
+    else:
+        noise_map = _perlin3_batch(
+            sx * base_scale + ox,
+            sy * base_scale + oy,
+            sz * base_scale + oz,
+            octaves=5, persistence=0.45, lacunarity=2.0,
+        )
 
     lo, hi = noise_map.min(), noise_map.max()
     if hi - lo > 1e-9:
@@ -217,7 +253,10 @@ def generate_equirect_texture(seed):
 
 
 def _precompute_uv(render_size):
-    """Precompute UV mapping arrays for hemisphere rendering at a given size."""
+    """Precompute UV mapping arrays for hemisphere rendering at a given size.
+
+    UV coordinates are normalized to [0, 1] so they work with any texture resolution.
+    """
     half = render_size / 2.0
     radius = half - 0.5
 
@@ -232,9 +271,9 @@ def _precompute_uv(render_size):
     lat = np.arcsin(np.clip(-ny, -1, 1))
     lon = np.arctan2(nx, nz)  # [-pi, pi]
 
-    # Map to equirect pixel coords (float for interpolation)
-    lat_idx = (lat + np.pi / 2) / np.pi * (EQUIRECT_H - 1)
-    lon_idx = (lon + np.pi) / (2 * np.pi) * EQUIRECT_W
+    # Normalized UV coordinates [0, 1] — scaled to texture dims at render time
+    lat_norm = (lat + np.pi / 2) / np.pi
+    lon_norm = (lon + np.pi) / (2 * np.pi)
 
     # Shading: edge darkening + top-left highlight
     dist = np.sqrt(np.clip(dist_sq, 0, 1))
@@ -248,14 +287,14 @@ def _precompute_uv(render_size):
     shade[inside] += highlight[inside]
     shade = np.clip(shade, 0.15, 1.2)
 
-    return inside, lat_idx, lon_idx, shade
+    return inside, lat_norm, lon_norm, shade
 
 
 def render_planet_frame(equirect, render_size, rotation_angle, tint_color=None):
     """Render a hemisphere from an equirectangular texture.
 
     Args:
-        equirect: (EQUIRECT_H, EQUIRECT_W, 3) uint8 texture.
+        equirect: (H, W, 3) uint8 texture (any resolution).
         render_size: Output square pixel size.
         rotation_angle: Rotation in radians (0 to 2*pi).
         tint_color: Optional (r, g, b) tuple to multiply onto the result.
@@ -265,14 +304,16 @@ def render_planet_frame(equirect, render_size, rotation_angle, tint_color=None):
     """
     if render_size not in _uv_cache:
         _uv_cache[render_size] = _precompute_uv(render_size)
-    inside, lat_idx, lon_idx, shade = _uv_cache[render_size]
+    inside, lat_norm, lon_norm, shade = _uv_cache[render_size]
 
-    rotation_offset = (rotation_angle / (2 * np.pi)) * EQUIRECT_W
-    shifted_lon = (lon_idx + rotation_offset) % EQUIRECT_W
+    eq_h, eq_w = equirect.shape[:2]
+
+    rotation_offset_norm = rotation_angle / (2 * np.pi)
+    shifted_lon_norm = (lon_norm + rotation_offset_norm) % 1.0
 
     iy, ix = np.where(inside)
-    lat_vals = lat_idx[iy, ix]
-    lon_vals = shifted_lon[iy, ix]
+    lat_vals = lat_norm[iy, ix] * (eq_h - 1)
+    lon_vals = shifted_lon_norm[iy, ix] * eq_w
 
     pixels = np.zeros((render_size, render_size, 3), dtype=np.uint8)
 
@@ -286,8 +327,8 @@ def render_planet_frame(equirect, render_size, rotation_angle, tint_color=None):
             pixels[iy, ix, c] = np.clip(sampled, 0, 255).astype(np.uint8)
     else:
         # Nearest-neighbor for small sizes (faster)
-        lat_int = np.clip(lat_vals.astype(int), 0, EQUIRECT_H - 1)
-        lon_int = lon_vals.astype(int) % EQUIRECT_W
+        lat_int = np.clip(lat_vals.astype(int), 0, eq_h - 1)
+        lon_int = lon_vals.astype(int) % eq_w
         pixels[iy, ix] = equirect[lat_int, lon_int]
 
     # Apply shading
@@ -323,14 +364,14 @@ def get_planet_rotation_angle(point_idx, elapsed_ms):
 
 
 def get_planet_equirect(point_idx, name_key):
-    """Get equirect texture for a point, generating if budget allows.
+    """Get low-res equirect texture for main view rendering.
 
     Args:
         point_idx: Index into the points array (cache key).
         name_key: Name key used as seed for texture generation.
 
     Returns:
-        (EQUIRECT_H, EQUIRECT_W, 3) uint8 ndarray, or None if over budget.
+        (EQUIRECT_H_LO, EQUIRECT_W_LO, 3) uint8 ndarray, or None if over budget.
     """
     global _frame_budget
     if point_idx in _equirect_cache:
@@ -338,9 +379,102 @@ def get_planet_equirect(point_idx, name_key):
     if _frame_budget <= 0:
         return None
     _frame_budget -= 1
-    tex = generate_equirect_texture(int(name_key))
+    tex = generate_equirect_texture(int(name_key), EQUIRECT_H_LO, EQUIRECT_W_LO)
     _equirect_cache[point_idx] = tex
     return tex
+
+
+def get_planet_equirect_hires(point_idx, name_key):
+    """Get high-res equirect texture for detail panel, with background preload.
+
+    Returns high-res if cached, otherwise starts a background preload and
+    falls back to low-res (or None if low-res also unavailable).
+
+    Args:
+        point_idx: Index into the points array (cache key).
+        name_key: Name key used as seed for texture generation.
+
+    Returns:
+        (H, W, 3) uint8 ndarray (high-res or low-res fallback), or None.
+    """
+    if point_idx in _equirect_cache_hi:
+        return _equirect_cache_hi[point_idx]
+    request_hires_preload(point_idx, name_key)
+    return get_planet_equirect(point_idx, name_key)
+
+
+def _preload_worker_loop():
+    """Background worker: generates hires textures from the queue."""
+    global _preload_active
+    while True:
+        _preload_event.wait()
+        while True:
+            with _preload_lock:
+                # Skip already-cached entries
+                while _preload_queue and _preload_queue[0][0] in _equirect_cache_hi:
+                    _preload_queue.pop(0)
+                if not _preload_queue:
+                    _preload_active = None
+                    _preload_event.clear()
+                    break
+                point_idx, name_key = _preload_queue.pop(0)
+                # Enforce cache cap — evict oldest entries if at limit
+                while len(_equirect_cache_hi) >= MAX_HIRES_CACHE:
+                    oldest = next(iter(_equirect_cache_hi))
+                    del _equirect_cache_hi[oldest]
+                _preload_active = point_idx
+            tex = generate_equirect_texture(int(name_key), EQUIRECT_H, EQUIRECT_W)
+            with _preload_lock:
+                _equirect_cache_hi[point_idx] = tex
+                _preload_active = None
+
+
+def _ensure_worker():
+    """Start the background preload worker if not already running."""
+    global _preload_worker
+    if _preload_worker is None or not _preload_worker.is_alive():
+        _preload_worker = threading.Thread(target=_preload_worker_loop, daemon=True)
+        _preload_worker.start()
+
+
+def request_hires_preload(point_idx, name_key):
+    """Queue a single high-priority hires texture for background generation."""
+    if point_idx in _equirect_cache_hi:
+        return
+    _ensure_worker()
+    with _preload_lock:
+        if _preload_active == point_idx:
+            return
+        # Remove if already queued, then insert at front (high priority)
+        _preload_queue[:] = [(i, k) for i, k in _preload_queue if i != point_idx]
+        _preload_queue.insert(0, (point_idx, name_key))
+    _preload_event.set()
+
+
+def update_hires_preload_queue(visible_indices, name_keys):
+    """Set the background preload queue to match current visible points.
+
+    Call each frame (or when visibility changes). Points already cached or
+    actively generating are skipped. High-priority items (from
+    request_hires_preload) stay at the front.
+    """
+    _ensure_worker()
+    with _preload_lock:
+        # Collect existing high-priority items (manually requested, not in visible set)
+        priority_idxs = set()
+        priority_items = []
+        for idx, key in _preload_queue:
+            if idx not in _equirect_cache_hi:
+                priority_idxs.add(idx)
+                priority_items.append((idx, key))
+
+        # Build new queue: priority items first, then visible points not yet cached
+        new_queue = list(priority_items)
+        for idx in visible_indices:
+            if idx not in _equirect_cache_hi and idx not in priority_idxs and idx != _preload_active:
+                new_queue.append((idx, int(name_keys[idx])))
+        _preload_queue[:] = new_queue
+    _preload_event.set()
 
 
 def reset_frame_budget():
@@ -353,3 +487,4 @@ def evict_planet_cache(indices):
     """Remove cached textures for points that left the view."""
     for idx in indices:
         _equirect_cache.pop(idx, None)
+        _equirect_cache_hi.pop(idx, None)

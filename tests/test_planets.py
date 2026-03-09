@@ -8,11 +8,17 @@ from lib.planets import (
     render_planet_frame,
     get_planet_rotation_angle,
     get_planet_equirect,
+    get_planet_equirect_hires,
+    request_hires_preload,
     reset_frame_budget,
     evict_planet_cache,
     EQUIRECT_H,
     EQUIRECT_W,
+    EQUIRECT_H_LO,
+    EQUIRECT_W_LO,
+    MAX_TEXTURES_PER_FRAME,
     _equirect_cache,
+    _equirect_cache_hi,
 )
 
 
@@ -22,6 +28,11 @@ class TestEquirectTexture(unittest.TestCase):
     def test_shape_and_dtype(self):
         tex = generate_equirect_texture(0)
         self.assertEqual(tex.shape, (EQUIRECT_H, EQUIRECT_W, 3))
+        self.assertEqual(tex.dtype, np.uint8)
+
+    def test_shape_lowres(self):
+        tex = generate_equirect_texture(0, EQUIRECT_H_LO, EQUIRECT_W_LO)
+        self.assertEqual(tex.shape, (EQUIRECT_H_LO, EQUIRECT_W_LO, 3))
         self.assertEqual(tex.dtype, np.uint8)
 
     def test_deterministic(self):
@@ -130,10 +141,10 @@ class TestCacheManagement(unittest.TestCase):
         self.assertIs(a, b)
 
     def test_budget_limits_generation(self):
-        reset_frame_budget()  # budget = 2
-        get_planet_equirect(0, 0)
-        get_planet_equirect(1, 1)
-        result = get_planet_equirect(2, 2)
+        reset_frame_budget()
+        for i in range(MAX_TEXTURES_PER_FRAME):
+            get_planet_equirect(i, i)
+        result = get_planet_equirect(MAX_TEXTURES_PER_FRAME, MAX_TEXTURES_PER_FRAME)
         self.assertIsNone(result, "Should return None when budget exhausted")
 
     def test_eviction(self):
@@ -145,6 +156,44 @@ class TestCacheManagement(unittest.TestCase):
 
     def test_eviction_ignores_missing(self):
         evict_planet_cache([999])  # should not raise
+
+    def test_lowres_texture_shape(self):
+        reset_frame_budget()
+        tex = get_planet_equirect(50, 50)
+        self.assertIsNotNone(tex)
+        self.assertEqual(tex.shape, (EQUIRECT_H_LO, EQUIRECT_W_LO, 3))
+
+    def test_hires_preload(self):
+        import time
+        _equirect_cache_hi.clear()
+        request_hires_preload(99, 99)
+        # Wait for background thread (high-res gen can be slow with Python fallback noise)
+        for _ in range(600):
+            if 99 in _equirect_cache_hi:
+                break
+            time.sleep(0.1)
+        self.assertIn(99, _equirect_cache_hi)
+        tex = _equirect_cache_hi[99]
+        self.assertEqual(tex.shape, (EQUIRECT_H, EQUIRECT_W, 3))
+
+    def test_hires_fallback_to_lowres(self):
+        _equirect_cache.clear()
+        _equirect_cache_hi.clear()
+        reset_frame_budget()
+        # First call: no hires cached, should fall back to low-res
+        tex = get_planet_equirect_hires(200, 200)
+        self.assertIsNotNone(tex)
+        self.assertEqual(tex.shape, (EQUIRECT_H_LO, EQUIRECT_W_LO, 3))
+
+    def test_eviction_clears_both_caches(self):
+        reset_frame_budget()
+        get_planet_equirect(60, 60)
+        _equirect_cache_hi[60] = np.zeros((EQUIRECT_H, EQUIRECT_W, 3), dtype=np.uint8)
+        self.assertIn(60, _equirect_cache)
+        self.assertIn(60, _equirect_cache_hi)
+        evict_planet_cache([60])
+        self.assertNotIn(60, _equirect_cache)
+        self.assertNotIn(60, _equirect_cache_hi)
 
 
 if __name__ == "__main__":

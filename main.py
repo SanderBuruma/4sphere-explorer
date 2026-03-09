@@ -8,7 +8,8 @@ from audio import init_audio, update_audio, cleanup_audio, get_audio_params
 from lib.constants import *
 from lib.graphics import draw_googly_eyes, get_identicon
 from lib.planets import (
-    get_planet_equirect, render_planet_frame, get_planet_rotation_angle,
+    get_planet_equirect, get_planet_equirect_hires, request_hires_preload,
+    update_hires_preload_queue, render_planet_frame, get_planet_rotation_angle,
     reset_frame_budget, evict_planet_cache,
 )
 from lib.gamepedia import (
@@ -139,6 +140,7 @@ def auto_travel_to_nearest_unvisited():
     nearest_idx, nearest_dist = find_nearest_unvisited(visible_indices, visible_distances)
 
     if nearest_idx is not None:
+        request_hires_preload(nearest_idx, _name_keys[nearest_idx])
         if traveling:
             # Queue the auto-travel target
             queued_target_idx = nearest_idx
@@ -208,6 +210,9 @@ def update_visible():
         point_identicon_cache.pop(idx, None)
         point_name_cache.pop(idx, None)
     evict_planet_cache(evicted)
+
+    # Queue hires texture generation for all visible points
+    update_hires_preload_queue(visible_indices, _name_keys)
 
 
 update_visible()
@@ -383,6 +388,7 @@ while running:
                         wedge = int((angle + math.pi + math.pi / 4) / (math.pi / 2) + 2) % 4
                         if wedge == 0:  # Info wedge (right)
                             inspected_point_idx = menu_point_idx
+                            request_hires_preload(menu_point_idx, _name_keys[menu_point_idx])
                         # wedges 1,2,3 are placeholders — no action
                     menu_state = "idle"
                     menu_point_idx = None
@@ -407,6 +413,7 @@ while running:
                         if best_idx is not None and best_dist_sq < 400:
                             clicked_idx = best_idx
                     if clicked_idx is not None:
+                        request_hires_preload(clicked_idx, _name_keys[clicked_idx])
                         if traveling:
                             queued_target_idx = clicked_idx
                             queued_target = points[clicked_idx]
@@ -439,6 +446,7 @@ while running:
                             clicked_idx = best_idx
 
                     if clicked_idx is not None:
+                        request_hires_preload(clicked_idx, _name_keys[clicked_idx])
                         if traveling:
                             # Queue — will start after current travel completes
                             queued_target_idx = clicked_idx
@@ -948,7 +956,7 @@ while running:
 
             # Draw rotating planet at top of panel
             point_color = point_display_colors.get(inspected_point_idx, point_colors[inspected_point_idx])
-            equirect = get_planet_equirect(inspected_point_idx, _name_keys[inspected_point_idx])
+            equirect = get_planet_equirect_hires(inspected_point_idx, _name_keys[inspected_point_idx])
             if equirect is not None:
                 rot = get_planet_rotation_angle(inspected_point_idx, elapsed_ms)
                 planet_surf = render_planet_frame(equirect, sprite_size, rot, tint_color=point_color)
