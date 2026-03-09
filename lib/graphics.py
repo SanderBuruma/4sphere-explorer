@@ -1,9 +1,88 @@
 """Procedural creature generation — low-poly faceted sprites with accent markings."""
 
+import math
 import numpy as np
 import pygame
 from scipy.spatial import Delaunay
 from scipy.ndimage import distance_transform_edt, binary_dilation
+
+# --- Eye wander/tracking constants ---
+_DECAY_RATE = 4.0          # /s — delta accumulator decay
+_ATTENTION_LOW = 2.0       # px — below = full wander
+_ATTENTION_HIGH = 30.0     # px — above = full tracking
+_ATTENTION_SMOOTH = 3.0    # /s — transition smoothing rate
+_WANDER_BASE_SPEED = 0.8   # rad/s — ~8s per full orbit
+_WANDER_REACH = 0.7        # fraction of max_offset for wander
+
+# Module-level eye tracking state (shared across all creatures)
+_eye_state = {
+    "prev_mouse": (0, 0),
+    "delta_accum": 0.0,
+    "attention": 0.0,
+    "wander_phase": 0.0,
+    "wander_speed": _WANDER_BASE_SPEED,
+    "_speed_timer": 0.0,       # seconds until next speed reseed
+    "last_update_ms": 0,
+    "_rng": np.random.RandomState(7),
+}
+
+
+def _wander_offset(phase):
+    """Compute a wandering (wx, wy) offset in [-1, 1] from the current phase.
+
+    Uses multiple incommensurate harmonics for an organic, non-repeating path.
+    Both eyes share the same offset so they stay synced.
+    """
+    wx = (math.sin(phase)
+          + 0.5 * math.sin(phase * 1.618 + 1.0)
+          + 0.3 * math.sin(phase * 2.879 + 3.7))
+    wy = (math.cos(phase * 1.2 + 0.5)
+          + 0.5 * math.cos(phase * 2.1 + 2.3)
+          + 0.3 * math.cos(phase * 3.37 + 5.1))
+    # Normalize to roughly [-1, 1] range (max theoretical ~1.8)
+    wx /= 1.8
+    wy /= 1.8
+    return wx, wy
+
+
+def update_eye_tracking(mouse_pos, current_ms):
+    """Update shared eye wander/tracking state. Call once per frame.
+
+    Args:
+        mouse_pos: (mx, my) current mouse position in screen coords.
+        current_ms: Current time in milliseconds (e.g. pygame.time.get_ticks()).
+    """
+    s = _eye_state
+    dt = min((current_ms - s["last_update_ms"]) / 1000.0, 0.1)
+    if dt <= 0:
+        s["prev_mouse"] = mouse_pos
+        s["last_update_ms"] = current_ms
+        return
+
+    # Mouse movement delta
+    dx = mouse_pos[0] - s["prev_mouse"][0]
+    dy = mouse_pos[1] - s["prev_mouse"][1]
+    raw_delta = math.sqrt(dx * dx + dy * dy)
+
+    # Decay + inject
+    s["delta_accum"] = s["delta_accum"] * math.exp(-_DECAY_RATE * dt) + raw_delta
+
+    # Raw attention from accumulator
+    raw_att = max(0.0, min(1.0,
+        (s["delta_accum"] - _ATTENTION_LOW) / (_ATTENTION_HIGH - _ATTENTION_LOW)))
+
+    # Smooth attention
+    s["attention"] += (raw_att - s["attention"]) * min(1.0, _ATTENTION_SMOOTH * dt)
+
+    # Advance wander phase; periodically reseed speed for variety
+    s["_speed_timer"] -= dt
+    if s["_speed_timer"] <= 0:
+        s["wander_speed"] = s["_rng"].uniform(0.4, 1.6)
+        s["_speed_timer"] = s["_rng"].uniform(2.0, 6.0)
+    s["wander_phase"] += s["wander_speed"] * dt
+
+    s["prev_mouse"] = mouse_pos
+    s["last_update_ms"] = current_ms
 
 
 def _color_from_seed(rng):
@@ -363,8 +442,8 @@ def generate_creature(seed, size=32):
     return surf, eye_info
 
 
-def draw_creature_eyes(screen, x, y, size, eye_info, mouse_pos):
-    """Draw tracking pupils on a creature already blitted to screen.
+def draw_creature_eyes(screen, x, y, size, eye_info, mouse_pos, seed=0):
+    """Draw tracking/wandering pupils on a creature already blitted to screen.
 
     Args:
         screen: pygame display surface.
@@ -372,27 +451,51 @@ def draw_creature_eyes(screen, x, y, size, eye_info, mouse_pos):
         size: Pixel size the creature was drawn at.
         eye_info: List of (norm_x, norm_y, norm_r) from generate_creature.
         mouse_pos: (mx, my) current mouse position in screen coords.
+        seed: Per-creature seed to offset wander phase (so creatures wander independently).
     """
     if not eye_info:
         return
     mx, my = mouse_pos
+    s = _eye_state
+    attention = s["attention"]
+    # Per-creature phase offset from seed (large prime multiplier for good spread)
+    phase = s["wander_phase"] + (seed * 2.6537) % (2 * math.pi * 100)
+    wx, wy = _wander_offset(phase)
+
     for (nx, ny, nr) in eye_info:
         eye_cx = x + nx * size
         eye_cy = y + ny * size
         eye_r = nr * size
         pupil_r = max(1, int(eye_r * 0.5))
-        # Direction from eye center to mouse, clamped inside sclera
-        dx = mx - eye_cx
-        dy = my - eye_cy
-        dist = max(1e-6, (dx * dx + dy * dy) ** 0.5)
-        max_offset = eye_r - pupil_r
-        if max_offset < 0:
-            max_offset = 0
+        max_offset = max(0.0, eye_r - pupil_r)
+
+        # Mouse-tracking offset (clamped inside sclera)
+        mdx = mx - eye_cx
+        mdy = my - eye_cy
+        dist = max(1e-6, (mdx * mdx + mdy * mdy) ** 0.5)
         if dist > max_offset:
-            dx = dx / dist * max_offset
-            dy = dy / dist * max_offset
-        px = int(eye_cx + dx)
-        py = int(eye_cy + dy)
+            mdx = mdx / dist * max_offset
+            mdy = mdy / dist * max_offset
+
+        # Wander offset scaled to fraction of max_offset
+        wander_r = max_offset * _WANDER_REACH
+        wdx = wx * wander_r
+        wdy = wy * wander_r
+
+        # Blend mouse tracking and wander
+        fdx = attention * mdx + (1 - attention) * wdx
+        fdy = attention * mdy + (1 - attention) * wdy
+
+        # Re-clamp blended result inside sclera
+        fdist = math.sqrt(fdx * fdx + fdy * fdy)
+        if fdist > max_offset and fdist > 1e-6:
+            fdx = fdx / fdist * max_offset
+            fdy = fdy / fdist * max_offset
+
+        # pygame.draw.circle pixel centroid is at (px-0.5, py-0.5) due to
+        # integer rasterization spanning [px-r, px+r-1]; +0.5 compensates
+        px = round(eye_cx + fdx + 0.5)
+        py = round(eye_cy + fdy + 0.5)
         pygame.draw.circle(screen, (0, 0, 0), (px, py), pupil_r)
 
 

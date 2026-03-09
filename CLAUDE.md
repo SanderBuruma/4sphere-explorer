@@ -68,6 +68,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - `tests/test_audio.py` — Audio signal generation and quality tests (17 tests)
 - `tests/test_planets.py` — Procedural planet generation and rendering tests (22 tests)
 - `tests/test_gamepedia.py` — Gamepedia click geometry and word-wrap tests (12 tests)
+- `tests/test_eye_tracking.py` — Eye wander/tracking attention and blending tests (12 tests)
 - `.gitignore` — venv exclusions
 
 ### Scale
@@ -78,7 +79,8 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 - **Camera distance:** 0.08 rad from player (reduced from 0.15 for tight framing)
 
 ### Features
-- **Procedural creatures:** Each point has a unique creature avatar with a low-poly faceted body (Delaunay triangulation), appendages (horns, fins, limbs, spikes), accent-colored markings (spots, dorsal ridge, belly, patches), and eyes. 32×32 cached on-demand with LRU eviction. Generated from name key seed via `generate_creature(seed, size)` for any resolution
+- **Procedural creatures:** Each point has a unique creature avatar with a low-poly faceted body (Delaunay triangulation), appendages (horns, fins, limbs, spikes), accent-colored markings (spots, dorsal ridge, belly, patches), and eyes with wandering/tracking behavior. 32×32 cached on-demand with LRU eviction. Generated from name key seed via `generate_creature(seed, size)` for any resolution
+- **Wandering eyes:** Creature eyes wander organically when the mouse is idle, using incommensurate harmonic oscillators for non-repeating paths. Mouse movement smoothly transitions eyes to cursor tracking via an exponentially-decayed attention system. Each creature wanders independently (per-seed phase offset) while both eyes on the same creature stay synced. Shared module-level state updated once per frame via `update_eye_tracking()`
 - **Lazy name generation:** 11.8M unique name space (4 regions: core+end+suffix+number, core+end+suffix, core+suffix+number, core+suffix). Numbers always appended after word suffixes, never replacing them. Keys sampled once at startup, decoded deterministically per point
 - **Tangent space projection:** Points projected into camera's local tangent plane, so visible points cluster around crosshair
 - **Procedural rotating planets:** Each point is a unique procedurally generated planet with smooth gradient noise textures (12 color palettes, seeded by name key). Planets rotate (20s period, per-point phase offset). Two-tier textures: low-res (32×64) for main view (max 6 per frame), high-res (128×256) preloaded on background thread for all visible points. Hemisphere rendered via normalized UV lookup with edge darkening and highlight shading. Falls back to circles for uncached planets

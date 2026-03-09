@@ -4,7 +4,7 @@ import math
 from collections import deque
 from audio import init_audio, update_audio, cleanup_audio, get_audio_params
 from lib.constants import *
-from lib.graphics import get_creature, generate_creature, draw_creature_eyes
+from lib.graphics import get_creature, generate_creature, draw_creature_eyes, update_eye_tracking
 from lib.planets import (
     get_planet_equirect, get_planet_equirect_hires, request_hires_preload,
     update_hires_preload_queue, render_planet_frame, get_planet_rotation_angle,
@@ -527,6 +527,7 @@ while running:
 
     # Check mouse position for hover tooltip
     mx, my = pygame.mouse.get_pos()
+    update_eye_tracking((mx, my), elapsed_ms)
     hover_point = None
     hover_dist_sq_min = float("inf")
 
@@ -853,7 +854,7 @@ while running:
         # Draw creature and label
         ident_y = ty + (tooltip_height - 32) // 2
         screen.blit(creature, (tx, ident_y))
-        draw_creature_eyes(screen, tx, ident_y, 32, creature_eyes, (mx, my))
+        draw_creature_eyes(screen, tx, ident_y, 32, creature_eyes, (mx, my), seed=_name_keys[h_idx])
         screen.blit(label_surface, (tx + 32 + 4, ty + (tooltip_height - label_rect.height) // 2))
 
     # Draw radial menu
@@ -973,7 +974,7 @@ while running:
                 panel_surf.blit(lbl, (padding, text_y + li * line_height))
 
             screen.blit(panel_surf, (px, py))
-            draw_creature_eyes(screen, px + ident_x, py + ident_y, creature_size, large_eyes, (mx, my))
+            draw_creature_eyes(screen, px + ident_x, py + ident_y, creature_size, large_eyes, (mx, my), seed=_name_keys[inspected_point_idx])
         else:
             # Inspected point not visible — keep panel state but skip render
             pass
@@ -1038,7 +1039,7 @@ while running:
         # Creature sprite from point seed
         creature, creature_eyes = get_creature(point_idx, point_creature_cache, _name_keys[point_idx])
         screen.blit(creature, (SCREEN_WIDTH - 285, y + 4))
-        draw_creature_eyes(screen, SCREEN_WIDTH - 285, y + 4, 32, creature_eyes, (mx, my))
+        draw_creature_eyes(screen, SCREEN_WIDTH - 285, y + 4, 32, creature_eyes, (mx, my), seed=_name_keys[point_idx])
 
         # Render name and distance with point's display color
         sidebar_color = point_display_colors.get(point_idx, point_colors[point_idx])
