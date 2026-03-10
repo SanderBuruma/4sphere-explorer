@@ -10,7 +10,7 @@ Usage:
 Available scripts (default: default):
     default     - Initial view + rotate + change view modes
     viewmodes   - Screenshot all 4 view modes
-    travel      - Click nearest point, travel, screenshot arrival
+    travel      - Click nearest planet, travel, screenshot arrival
     custom      - Define actions in ACTIONS list below
 
 Actions are lists of (action_type, *args) tuples:
@@ -18,7 +18,7 @@ Actions are lists of (action_type, *args) tuples:
     ("keys", {K_w: True, ...}, N)    - Hold keys for N frames
     ("wait", N)                      - Run N frames with no input
     ("set_view_mode", 0-3)           - Set view mode directly
-    ("click_nearest",)               - Start travel to nearest visible point
+    ("click_nearest",)               - Start travel to nearest visible planet
     ("travel_complete",)             - Wait until travel finishes
     ("rotate", "wasd_key", frames)   - Rotate in a direction for N frames
 """
@@ -56,7 +56,7 @@ from sphere import (
 
 # ── Constants (mirror main.py) ──────────────────────────────────────────
 SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 800
-NUM_POINTS = 30_000
+NUM_PLANETS = 30_000
 FOV_ANGLE = 0.116
 GAME_SEED = 42
 CAMERA_OFFSET = 0.08
@@ -80,17 +80,17 @@ _init_basis = tangent_basis(camera_pos)
 for _i in range(3):
     orientation[_i + 1] = _init_basis[_i]
 
-points = random_point_on_s3(NUM_POINTS)
-visibility_kdtree = build_visibility_kdtree(points)
-_name_keys = np.random.default_rng(GAME_SEED).choice(TOTAL_NAMES, NUM_POINTS, replace=False)
-point_name_cache = {}
+planets = random_point_on_s3(NUM_PLANETS)
+visibility_kdtree = build_visibility_kdtree(planets)
+_name_keys = np.random.default_rng(GAME_SEED).choice(TOTAL_NAMES, NUM_PLANETS, replace=False)
+planet_name_cache = {}
 
 def get_name(idx):
-    if idx not in point_name_cache:
-        point_name_cache[idx] = decode_name(_name_keys[idx])
-    return point_name_cache[idx]
+    if idx not in planet_name_cache:
+        planet_name_cache[idx] = decode_name(_name_keys[idx])
+    return planet_name_cache[idx]
 
-point_colors = random_color(NUM_POINTS)
+planet_colors = random_color(NUM_PLANETS)
 view_mode = 0
 view_zoom = 1.0
 
@@ -137,8 +137,8 @@ _star_sizes = _star_rng.choice([1, 1, 1, 2], NUM_STARS)
 
 def update_visible():
     global visible_indices, visible_distances
-    vis_points, indices = query_visible_kdtree(visibility_kdtree, player_pos, points, FOV_ANGLE)
-    distances = [angular_distance(player_pos, points[i]) for i in indices]
+    vis_planets, indices = query_visible_kdtree(visibility_kdtree, player_pos, planets, FOV_ANGLE)
+    distances = [angular_distance(player_pos, planets[i]) for i in indices]
     sorted_pairs = sorted(zip(indices, distances), key=lambda x: x[1])
     visible_indices = [p[0] for p in sorted_pairs]
     visible_distances = [p[1] for p in sorted_pairs]
@@ -173,8 +173,8 @@ def render_frame():
             b = int(_star_brightness[si] * 255)
             pygame.draw.circle(screen, (b, b, b), (sx, sy), int(_star_sizes[si]))
 
-    # Build point display colors dict for sidebar
-    point_display_colors = {}
+    # Build planet display colors dict for sidebar
+    planet_display_colors = {}
 
     if view_mode in (2, 3):
         player_frame = build_player_frame(player_pos, orientation)
@@ -199,7 +199,7 @@ def render_frame():
                 v1 /= np.linalg.norm(v1)
                 player_frame[1] = v1
 
-        vis_pts = points[visible_indices]
+        vis_pts = planets[visible_indices]
         rel_vis = vis_pts @ player_frame.T
         xyz_scale = min(view_width, SCREEN_HEIGHT) * 0.4 * view_zoom
         screen_x = (center_x + rel_vis[:, 1] * xyz_scale).astype(int)
@@ -218,14 +218,14 @@ def render_frame():
             normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / FOV_ANGLE)))
             radius = max(1, int(2 + normalized_dist * 4))
             color = (min(255, r), min(255, g), min(255, b))
-            point_display_colors[idx] = color
+            planet_display_colors[idx] = color
             pygame.draw.circle(screen, color, (sx, sy), radius)
     else:
         basis = [orientation[1], orientation[2], orientation[3]]
         player_screen_offset = project_to_tangent(camera_pos, player_pos, basis)
 
         for i, idx in enumerate(visible_indices):
-            p4d = points[idx]
+            p4d = planets[idx]
             tangent_xyz = project_to_tangent(camera_pos, p4d, basis)
             tangent_xyz[0] -= player_screen_offset[0]
             tangent_xyz[1] -= player_screen_offset[1]
@@ -239,7 +239,7 @@ def render_frame():
             radius = max(1, int(2 + normalized_dist * 6))
 
             if view_mode == 0:
-                color = tuple(int(c) for c in point_colors[idx])
+                color = tuple(int(c) for c in planet_colors[idx])
             else:
                 rel = p4d - player_pos
                 n = np.linalg.norm(rel)
@@ -251,7 +251,7 @@ def render_frame():
                 brightness = (rel[3] + 1) / 2
                 color = (int(r * brightness), int(g * brightness), int(b * brightness))
 
-            point_display_colors[idx] = color
+            planet_display_colors[idx] = color
 
             # Try planet sprite, fall back to circle
             rendered = False
@@ -290,8 +290,8 @@ def render_frame():
     mode_text = font.render(f"View: {mode_label}", True, TEXT_COLOR)
     screen.blit(mode_text, (sidebar_x + 10, 10))
 
-    # Point count
-    count_text = font.render(f"Visible: {len(visible_indices)} points", True, TEXT_COLOR)
+    # Planet count
+    count_text = font.render(f"Visible: {len(visible_indices)} planets", True, TEXT_COLOR)
     screen.blit(count_text, (sidebar_x + 10, 30))
 
     # Travel indicator
@@ -301,13 +301,13 @@ def render_frame():
         travel_text = font.render(f"Traveling to {name} ({format_dist(dist)})", True, (100, 200, 255))
         screen.blit(travel_text, (sidebar_x + 10, 50))
 
-    # Point list
+    # Planet list
     item_height = 40
     list_y = 100
     max_items = (SCREEN_HEIGHT - list_y) // item_height
     for li, idx in enumerate(visible_indices[:max_items]):
         y = list_y + li * item_height
-        color = point_display_colors.get(idx, (200, 200, 255))
+        color = planet_display_colors.get(idx, (200, 200, 255))
         name = get_name(idx)
         dist = visible_distances[li] if li < len(visible_distances) else 0
         item_bg = (60, 60, 90)
@@ -346,12 +346,12 @@ def step_travel():
 
 
 def start_travel_to_nearest():
-    """Begin travel to nearest visible point."""
+    """Begin travel to nearest visible planet."""
     global traveling, travel_target, travel_target_idx, travel_progress
     if not visible_indices:
         return
     travel_target_idx = visible_indices[0]
-    travel_target = points[travel_target_idx]
+    travel_target = planets[travel_target_idx]
     traveling = True
     travel_progress = 0.0
     print(f"  Travel to {get_name(travel_target_idx)} ({format_dist(visible_distances[0])})")
@@ -417,7 +417,7 @@ def script_viewmodes():
 
 
 def script_travel():
-    """Travel to nearest point and screenshot."""
+    """Travel to nearest planet and screenshot."""
     update_visible()
     render_frame()
     save_screenshot("travel_01_before")

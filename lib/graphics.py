@@ -509,10 +509,10 @@ def draw_creature_eyes(screen, x, y, size, eye_info, mouse_pos, seed=0):
 
 
 def get_creature(idx, cache, name_key):
-    """Get or generate creature sprite for a point, with lazy caching.
+    """Get or generate creature sprite for a planet, with lazy caching.
 
     Args:
-        idx: Point index (cache key).
+        idx: Planet index (cache key).
         cache: Dict mapping idx -> (pygame.Surface, eye_info).
         name_key: Integer seed for generation.
 
@@ -728,10 +728,10 @@ def get_morph_frame(frames, elapsed_ms):
 
 
 def get_creature_animated(idx, cache, name_key):
-    """Get or generate animated creature frames for a point, with lazy caching.
+    """Get or generate animated creature frames for a planet, with lazy caching.
 
     Args:
-        idx: Point index (cache key).
+        idx: Planet index (cache key).
         cache: Dict mapping idx -> (frames_list, eye_info).
         name_key: Integer seed for generation.
 
