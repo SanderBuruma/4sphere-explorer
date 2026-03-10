@@ -158,7 +158,7 @@ visible_indices = []
 visible_distances = []
 hovered_item = None
 view_mode = 0  # 0 = assigned colors, 1 = relative 4D position colors, 2 = XYZ projection (W→color), 3 = XYZ Fixed-Y
-xyz_zoom = 1.0  # zoom level for XYZ projection view
+view_zoom = 1.0  # zoom level for all view modes
 XYZ_FIXED_UP = np.array([0.0, 1.0, 0.0, 0.0])  # absolute Y axis for mode 3
 last_projected_points = []  # store for click detection
 list_start_y = 100  # Y coordinate where point list items begin (updated each frame)
@@ -317,19 +317,19 @@ while running:
                 elif event.key == pygame.K_TAB:
                     auto_travel_to_nearest_unvisited()
                 elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-                    if pygame.key.get_mods() & pygame.KMOD_CTRL and view_mode in (2, 3):
-                        xyz_zoom *= 1.25
+                    if pygame.key.get_mods() & pygame.KMOD_CTRL:
+                        view_zoom *= 1.25
                 elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                    if pygame.key.get_mods() & pygame.KMOD_CTRL and view_mode in (2, 3):
-                        xyz_zoom = max(0.1, xyz_zoom / 1.25)
+                    if pygame.key.get_mods() & pygame.KMOD_CTRL:
+                        view_zoom = max(0.1, view_zoom / 1.25)
         elif event.type == pygame.MOUSEWHEEL:
             if gamepedia_open:
                 gamepedia_scroll = max(0, gamepedia_scroll - event.y * 3)
-            elif view_mode in (2, 3):
+            else:
                 if event.y > 0:
-                    xyz_zoom *= 1.15
+                    view_zoom *= 1.15
                 elif event.y < 0:
-                    xyz_zoom = max(0.1, xyz_zoom / 1.15)
+                    view_zoom = max(0.1, view_zoom / 1.15)
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if gamepedia_open:
                 if event.button == 1:
@@ -565,7 +565,7 @@ while running:
         rel_vis = vis_points @ player_frame.T  # columns: [along_player, basis1, basis2, basis3]
 
         # Screen mapping: basis1→X, basis2→Y, basis3(W-like)→color
-        xyz_scale = min(view_width, SCREEN_HEIGHT) * 0.4 * xyz_zoom
+        xyz_scale = min(view_width, SCREEN_HEIGHT) * 0.4 * view_zoom
         screen_x = (center_x + rel_vis[:, 1] * xyz_scale).astype(int)
         screen_y = (center_y + rel_vis[:, 2] * xyz_scale).astype(int)
         w_vals = rel_vis[:, 3]  # the 4th dimension relative to player
@@ -616,7 +616,7 @@ while running:
             tangent_xyz = project_to_tangent(camera_pos, p4d, basis)
             tangent_xyz[0] -= player_screen_offset[0]
             tangent_xyz[1] -= player_screen_offset[1]
-            p2d, depth = project_tangent_to_screen(tangent_xyz, view_width, SCREEN_HEIGHT)
+            p2d, depth = project_tangent_to_screen(tangent_xyz, view_width, SCREEN_HEIGHT, scale=2500 * view_zoom)
             angular_dist = visible_distances[i]
             projected_points.append((p2d, angular_dist, depth, idx))
 
@@ -629,7 +629,7 @@ while running:
                 # Size and brightness based on angular distance from camera
                 max_distance = FOV_ANGLE
                 normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
-                radius = int(2 + normalized_dist * 5)
+                radius = max(2, int((2 + normalized_dist * 5) * view_zoom))
 
                 if view_mode == 0:
                     # Assigned color, modulate brightness by distance
@@ -690,7 +690,7 @@ while running:
                 trail_tangent = project_to_tangent(camera_pos, trail_p4d, basis)
                 trail_tangent[0] -= player_screen_offset[0]
                 trail_tangent[1] -= player_screen_offset[1]
-                trail_p2d, trail_depth = project_tangent_to_screen(trail_tangent, view_width, SCREEN_HEIGHT)
+                trail_p2d, trail_depth = project_tangent_to_screen(trail_tangent, view_width, SCREEN_HEIGHT, scale=2500 * view_zoom)
                 tx, ty = int(trail_p2d[0]), int(trail_p2d[1])
                 if 0 <= tx < view_width and 0 <= ty < SCREEN_HEIGHT:
                     fade = (trail_i + 1) / trail_len
@@ -708,7 +708,7 @@ while running:
                 # Draw 50% transparent white circle outline around the point
                 max_distance = FOV_ANGLE
                 normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
-                radius = int(2 + normalized_dist * 5)
+                radius = max(2, int((2 + normalized_dist * 5) * view_zoom))
                 circle_radius = radius + 8
                 # Create temporary surface for transparent circle
                 temp_surf = pygame.Surface((circle_radius * 2 + 4, circle_radius * 2 + 4), pygame.SRCALPHA)
@@ -728,7 +728,7 @@ while running:
                 if idx == pop_animation_idx:
                     max_distance = FOV_ANGLE
                     normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
-                    base_radius = int(2 + normalized_dist * 5)
+                    base_radius = max(2, int((2 + normalized_dist * 5) * view_zoom))
                     expand_radius = base_radius + int(progress * 20)
                     alpha = int(255 * (1 - progress))
                     temp_surf = pygame.Surface((expand_radius * 2 + 4, expand_radius * 2 + 4), pygame.SRCALPHA)

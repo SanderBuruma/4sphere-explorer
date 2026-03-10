@@ -92,7 +92,7 @@ def get_name(idx):
 
 point_colors = random_color(NUM_POINTS)
 view_mode = 0
-xyz_zoom = 1.0
+view_zoom = 1.0
 
 # Travel state
 traveling = False
@@ -201,7 +201,7 @@ def render_frame():
 
         vis_pts = points[visible_indices]
         rel_vis = vis_pts @ player_frame.T
-        xyz_scale = min(view_width, SCREEN_HEIGHT) * 0.4 * xyz_zoom
+        xyz_scale = min(view_width, SCREEN_HEIGHT) * 0.4 * view_zoom
         screen_x = (center_x + rel_vis[:, 1] * xyz_scale).astype(int)
         screen_y = (center_y + rel_vis[:, 2] * xyz_scale).astype(int)
         w_vals = rel_vis[:, 3]

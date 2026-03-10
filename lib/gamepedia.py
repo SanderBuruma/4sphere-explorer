@@ -15,7 +15,7 @@ V     Switch coloring mode (4 modes — see View Modes)
 Tab   Jump to the closest unvisited point
 / F   Open the name search bar
 F1    Open/close this screen
-Ctrl +/-  Zoom in XYZ projection modes"""),
+Ctrl +/-  Zoom in/out"""),
         ("Mouse", """\
 Click a point in the viewport to fly there. Hold-click to open the \
 radial menu instead.
@@ -24,7 +24,7 @@ Click a name in the sidebar to fly to that point.
 
 Drag anywhere in the viewport to rotate your view freely.
 
-Mouse wheel zooms when in XYZ projection modes (2 and 3)."""),
+Mouse wheel zooms in any view mode."""),
         ("View Modes", """\
 Press V to cycle through four coloring modes:
 
