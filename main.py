@@ -4,7 +4,11 @@ import math
 from collections import deque
 from audio import init_audio, update_audio, cleanup_audio, get_audio_params
 from lib.constants import *
-from lib.graphics import get_creature, generate_creature, draw_creature_eyes, update_eye_tracking
+from lib.graphics import (
+    get_creature, generate_creature, draw_creature_eyes, update_eye_tracking,
+    generate_morph_data, render_morph_frame,
+    get_creature_animated, get_morph_frame,
+)
 from lib.planets import (
     get_planet_equirect, get_planet_equirect_hires, request_hires_preload,
     update_hires_preload_queue, render_planet_frame, get_planet_rotation_angle,
@@ -84,6 +88,9 @@ point_colors = random_color(NUM_POINTS)  # Assign random colors
 
 # Lazy identicon cache: idx -> pygame Surface
 point_creature_cache = {}
+
+# Morph animation cache for detail panel: (idx, morph_data) or None
+_morph_cache = {'idx': None, 'data': None}
 
 traveling = False
 travel_target = None
@@ -829,7 +836,8 @@ while running:
         label = f"{name} ({format_dist(h_dist)})"
         label_surface = font.render(label, True, TEXT_COLOR)
         label_rect = label_surface.get_rect()
-        creature, creature_eyes = get_creature(h_idx, point_creature_cache, _name_keys[h_idx])
+        anim_frames, creature_eyes = get_creature_animated(h_idx, point_creature_cache, _name_keys[h_idx])
+        creature = get_morph_frame(anim_frames, elapsed_ms)
 
         # Total width: creature (32px) + gap (4px) + label
         tooltip_width = 32 + 4 + label_rect.width
@@ -958,8 +966,12 @@ while running:
                 planet_surf = render_planet_frame(equirect, sprite_size, rot, tint_color=point_color)
                 panel_surf.blit(planet_surf, (creature_size + padding * 2, padding))
 
-            # Draw large creature sprite in top-left
-            large_creature, large_eyes = generate_creature(int(_name_keys[inspected_point_idx]), size=creature_size)
+            # Draw morphing creature sprite in top-left
+            morph_seed = int(_name_keys[inspected_point_idx])
+            if _morph_cache['idx'] != inspected_point_idx:
+                _morph_cache['idx'] = inspected_point_idx
+                _morph_cache['data'] = generate_morph_data(morph_seed, size=creature_size)
+            large_creature, large_eyes = render_morph_frame(_morph_cache['data'], elapsed_ms)
             ident_x = padding
             ident_y = padding
             panel_surf.blit(large_creature, (ident_x, ident_y))
@@ -1036,8 +1048,9 @@ while running:
             item_bg = LIST_ITEM_BG
         pygame.draw.rect(screen, item_bg, (SCREEN_WIDTH - 290, y, 290, item_height))
 
-        # Creature sprite from point seed
-        creature, creature_eyes = get_creature(point_idx, point_creature_cache, _name_keys[point_idx])
+        # Animated creature sprite from point seed
+        anim_frames, creature_eyes = get_creature_animated(point_idx, point_creature_cache, _name_keys[point_idx])
+        creature = get_morph_frame(anim_frames, elapsed_ms)
         screen.blit(creature, (SCREEN_WIDTH - 285, y + 4))
         draw_creature_eyes(screen, SCREEN_WIDTH - 285, y + 4, 32, creature_eyes, (mx, my), seed=_name_keys[point_idx])
 
