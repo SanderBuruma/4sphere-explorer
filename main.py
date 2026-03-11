@@ -18,7 +18,9 @@ from lib.gamepedia import (
     GP_LEFT_X, GP_LEFT_W, GP_TOP_Y, GP_LINE_H,
     GAMEPEDIA_CONTENT, _gamepedia_flat, word_wrap_text,
 )
-from lib.reputation import get_reputation, get_tier, record_visit
+from lib.reputation import get_reputation, get_tier, record_visit, record_talk
+from lib.traits import generate_traits
+from lib.dialogue import generate_dialogue
 from sphere import (
     random_point_on_s3,
     angular_distance,
@@ -111,6 +113,15 @@ visit_history = deque(maxlen=50)  # Ordered trail of visited planet indices
 reputation_store = {}
 auto_travel_feedback = None  # (message, timestamp) or None
 auto_travel_feedback_duration = 2000  # milliseconds
+
+# Dialogue display state
+dialogue_text = None         # Current dialogue string or None
+dialogue_show_time = None    # Tick when dialogue was triggered
+dialogue_point_idx = None    # Planet index the dialogue is for
+
+# Reputation feedback state
+rep_feedback_text = None     # e.g. "+1 ★"
+rep_feedback_time = None     # Tick when feedback started
 
 # Radial menu state
 menu_state = "idle"  # idle | hold_pending | menu_open
@@ -395,7 +406,22 @@ while running:
                         if wedge == 0:  # Info wedge (right)
                             inspected_planet_idx = menu_planet_idx
                             request_hires_preload(menu_planet_idx, _name_keys[menu_planet_idx])
-                        # wedges 1,2,3 are placeholders — no action
+                        elif wedge == 3:  # Talk wedge (top)
+                            talk_idx = menu_planet_idx
+                            talk_key = int(_name_keys[talk_idx])
+                            traits = generate_traits(talk_key)
+                            rep_before = get_reputation(reputation_store, talk_idx)
+                            score_before = rep_before["score"]
+                            record_talk(reputation_store, talk_idx)
+                            rep_after = get_reputation(reputation_store, talk_idx)
+                            score_after = rep_after["score"]
+                            dialogue_text = generate_dialogue(talk_key, traits, score_after)
+                            dialogue_show_time = pygame.time.get_ticks()
+                            dialogue_point_idx = talk_idx
+                            if score_after > score_before:
+                                rep_feedback_text = "+1 \u2605"
+                                rep_feedback_time = pygame.time.get_ticks()
+                        # wedges 1,2 are placeholders — no action
                     menu_state = "idle"
                     menu_planet_idx = None
                     menu_center = None
@@ -500,11 +526,27 @@ while running:
 
             # Travel complete — mark as visited
             if travel_target_idx is not None:
+                rep_before = get_reputation(reputation_store, travel_target_idx)
+                visits_before = rep_before["visits"]
+                score_before = rep_before["score"]
                 visited_planets.add(travel_target_idx)
                 visit_history.append(travel_target_idx)
                 record_visit(reputation_store, travel_target_idx)
+                rep_after = get_reputation(reputation_store, travel_target_idx)
+                score_after = rep_after["score"]
                 auto_travel_feedback = (f"Visited: {get_name(travel_target_idx)}", pygame.time.get_ticks())
                 print(f"Visited: {get_name(travel_target_idx)} ({len(visited_planets)} total)")
+                # Reputation change feedback
+                if score_after > score_before:
+                    rep_feedback_text = "+1 \u2605"
+                    rep_feedback_time = pygame.time.get_ticks()
+                # First visit auto-greet
+                if visits_before == 0:
+                    arr_key = int(_name_keys[travel_target_idx])
+                    arr_traits = generate_traits(arr_key)
+                    dialogue_text = generate_dialogue(arr_key, arr_traits, 0)
+                    dialogue_show_time = pygame.time.get_ticks()
+                    dialogue_point_idx = travel_target_idx
 
             if queued_target is not None:
                 # Start queued travel
@@ -886,8 +928,8 @@ while running:
         pygame.draw.circle(menu_surf, (20, 20, 40, 180), (mc, mc), MENU_RADIUS)
 
         # Draw wedge labels
-        wedge_labels = ["Info", "A", "B", "C"]
-        wedge_colors = [(100, 200, 255), (100, 100, 120), (100, 100, 120), (100, 100, 120)]
+        wedge_labels = ["Info", "A", "B", "Talk"]
+        wedge_colors = [(100, 200, 255), (100, 100, 120), (100, 100, 120), (255, 200, 100)]
         wedge_angles = [0, math.pi / 2, math.pi, 3 * math.pi / 2]  # right, down-ish, left, up-ish (screen coords inverted)
         for wi, (label, color, wa) in enumerate(zip(wedge_labels, wedge_colors, wedge_angles)):
             # Highlight hovered wedge with filled pie sector
@@ -908,7 +950,7 @@ while running:
             wr = (WEDGE_INNER + MENU_RADIUS) / 2
             wx = mc + int(wr * math.cos(wa))
             wy = mc - int(wr * math.sin(wa))  # invert y for screen
-            lbl = font.render(label, True, color if wi == 0 else (80, 80, 100))
+            lbl = font.render(label, True, color if wi in (0, 3) else (80, 80, 100))
             menu_surf.blit(lbl, (wx - lbl.get_width() // 2, wy - lbl.get_height() // 2))
 
         # Inner dead zone circle
@@ -997,6 +1039,102 @@ while running:
         else:
             # Inspected planet not visible — keep panel state but skip render
             pass
+
+    # Draw speech bubble for active dialogue
+    if dialogue_text is not None and dialogue_show_time is not None:
+        dial_elapsed = pygame.time.get_ticks() - dialogue_show_time
+        total_duration = DIALOGUE_DURATION + DIALOGUE_FADE
+        if dial_elapsed > total_duration:
+            dialogue_text = None
+            dialogue_show_time = None
+            dialogue_point_idx = None
+        else:
+            # Compute opacity (fade during last DIALOGUE_FADE ms)
+            if dial_elapsed > DIALOGUE_DURATION:
+                fade_progress = (dial_elapsed - DIALOGUE_DURATION) / DIALOGUE_FADE
+                bubble_alpha = int(255 * (1.0 - fade_progress))
+            else:
+                bubble_alpha = 255
+
+            # Find screen position of dialogue creature
+            bubble_screen_pos = None
+            if dialogue_point_idx is not None:
+                for p2d, ang, dep, idx in last_projected_planets:
+                    if idx == dialogue_point_idx:
+                        sx, sy = int(p2d[0]), int(p2d[1])
+                        if 0 <= sx < SCREEN_WIDTH - 300 and 0 <= sy < SCREEN_HEIGHT:
+                            bubble_screen_pos = (sx, sy)
+                        break
+
+            # Word-wrap dialogue text
+            bubble_max_w = 250
+            bubble_padding = 8
+            wrapped_lines = word_wrap_text(dialogue_text, bubble_max_w - bubble_padding * 2, font)
+            line_h_bubble = 16
+            bubble_w = bubble_max_w
+            bubble_h = bubble_padding * 2 + len(wrapped_lines) * line_h_bubble + 8  # +8 for pointer
+
+            if bubble_screen_pos is not None:
+                # Position above the creature
+                bx = bubble_screen_pos[0] - bubble_w // 2
+                by = bubble_screen_pos[1] - bubble_h - 20
+                # Keep on screen
+                bx = max(4, min(bx, SCREEN_WIDTH - 304 - bubble_w))
+                if by < 4:
+                    by = bubble_screen_pos[1] + 20
+            else:
+                # Creature off-screen: centered overlay
+                bx = (SCREEN_WIDTH - 300) // 2 - bubble_w // 2
+                by = SCREEN_HEIGHT // 2 - bubble_h // 2
+
+            bubble_surf = pygame.Surface((bubble_w, bubble_h), pygame.SRCALPHA)
+            # Background
+            pygame.draw.rect(bubble_surf, (30, 30, 50, min(180, bubble_alpha)),
+                             (0, 0, bubble_w, bubble_h - 8), border_radius=4)
+            # Border using creature color
+            border_color = planet_display_colors.get(dialogue_point_idx, TEXT_COLOR)
+            border_alpha = min(120, bubble_alpha // 2)
+            pygame.draw.rect(bubble_surf, (*border_color, border_alpha),
+                             (0, 0, bubble_w, bubble_h - 8), 1, border_radius=4)
+            # Small triangle pointer
+            if bubble_screen_pos is not None:
+                ptr_x = min(bubble_w - 12, max(12, bubble_screen_pos[0] - bx))
+                ptr_y = bubble_h - 8
+                pygame.draw.polygon(bubble_surf, (30, 30, 50, min(180, bubble_alpha)),
+                                    [(ptr_x - 6, ptr_y), (ptr_x + 6, ptr_y), (ptr_x, ptr_y + 8)])
+            # Render text
+            for li, line in enumerate(wrapped_lines):
+                text_alpha = min(200, bubble_alpha)
+                lbl = font.render(line, True, (*TEXT_COLOR, text_alpha))
+                bubble_surf.blit(lbl, (bubble_padding, bubble_padding + li * line_h_bubble))
+
+            screen.blit(bubble_surf, (bx, by))
+
+    # Draw reputation feedback (+1 star)
+    if rep_feedback_text is not None and rep_feedback_time is not None:
+        fb_elapsed = pygame.time.get_ticks() - rep_feedback_time
+        if fb_elapsed > 1000:
+            rep_feedback_text = None
+            rep_feedback_time = None
+        else:
+            fb_alpha = int(255 * (1.0 - fb_elapsed / 1000.0))
+            fb_y_offset = int(fb_elapsed * 0.02)  # float upward
+            fb_surf = font.render(rep_feedback_text, True, (255, 200, 50))
+            fb_overlay = pygame.Surface(fb_surf.get_size(), pygame.SRCALPHA)
+            fb_overlay.fill((255, 200, 50, fb_alpha))
+            fb_surf.set_alpha(fb_alpha)
+            # Position near dialogue bubble or center
+            if dialogue_point_idx is not None:
+                fb_pos = None
+                for p2d, ang, dep, idx in last_projected_planets:
+                    if idx == dialogue_point_idx:
+                        fb_pos = (int(p2d[0]) + 10, int(p2d[1]) - 30 - fb_y_offset)
+                        break
+                if fb_pos is None:
+                    fb_pos = ((SCREEN_WIDTH - 300) // 2, SCREEN_HEIGHT // 2 - 40 - fb_y_offset)
+            else:
+                fb_pos = ((SCREEN_WIDTH - 300) // 2, SCREEN_HEIGHT // 2 - 40 - fb_y_offset)
+            screen.blit(fb_surf, fb_pos)
 
     # Draw divider line
     pygame.draw.line(
