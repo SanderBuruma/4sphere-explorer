@@ -29,6 +29,10 @@ HOLD_THRESHOLD = 200  # ms before radial menu opens
 MENU_RADIUS = 50  # pixel radius of radial menu
 WEDGE_INNER = 15  # inner dead zone radius
 
+# Dialogue
+DIALOGUE_DURATION = 5000  # ms speech bubble display
+DIALOGUE_FADE = 1000      # ms fade-out at end
+
 # Starfield
 NUM_STARS = 200
 
