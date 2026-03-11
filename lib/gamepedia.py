@@ -244,6 +244,13 @@ planet's name, exact distance, full 4D coordinates (x, y, z, w), \
 and your reputation with that creature (shown as stars).
 
 Click anywhere else to dismiss the panel."""),
+        ("Saving", """\
+Your progress saves automatically when you close the game. This includes \
+your position, orientation, reputation with creatures, and visit history. \
+The next time you launch, you'll resume exactly where you left off.
+
+If the save file is missing or corrupted, the game starts fresh with \
+defaults — it will never crash on a bad save."""),
     ]),
 ]
 

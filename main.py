@@ -19,6 +19,7 @@ from lib.gamepedia import (
     GAMEPEDIA_CONTENT, _gamepedia_flat, word_wrap_text,
 )
 from lib.reputation import get_reputation, get_tier, record_visit, record_talk
+from lib.persistence import save_game, load_game
 from lib.traits import generate_traits
 from lib.dialogue import generate_dialogue
 from sphere import (
@@ -232,6 +233,18 @@ def update_visible():
     update_hires_preload_queue(visible_indices, _name_keys)
 
 
+# Load saved state if available
+_save_data = load_game()
+if _save_data:
+    player_pos = _save_data["player_pos"]
+    orientation = _save_data["orientation"]
+    reputation_store = _save_data["reputation_store"]
+    visited_planets = _save_data["visited_planets"]
+    visit_history = _save_data["visit_history"]
+    view_mode = _save_data.get("view_mode", 0)
+    view_zoom = _save_data.get("view_zoom", 1.0)
+    camera_pos = orientation[0]
+
 update_visible()
 
 running = True
@@ -301,6 +314,8 @@ while running:
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
+            save_game(player_pos, orientation, reputation_store, visited_planets,
+                      visit_history, view_mode, view_zoom)
             running = False
         elif event.type == pygame.KEYDOWN:
             if gamepedia_open:
@@ -1340,5 +1355,10 @@ while running:
 
     pygame.display.flip()
 
+try:
+    save_game(player_pos, orientation, reputation_store, visited_planets,
+              visit_history, view_mode, view_zoom)
+except Exception:
+    pass
 cleanup_audio()
 pygame.quit()
