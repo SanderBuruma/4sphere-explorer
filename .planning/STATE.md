@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Prototype
 current_phase: 5
-status: in_progress
-stopped_at: "Completed 5-02-PLAN.md"
+status: complete
+stopped_at: "Completed 5-03-PLAN.md"
 last_updated: "2026-03-11"
-last_activity: "Phase 5 Plan 02 (Dialogue System) completed"
+last_activity: "Phase 5 Plan 03 (UI Integration) completed"
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 3
 ---
 
 # State: 4-Sphere Explorer
@@ -33,12 +33,12 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 
 ## Current Position
 
-Phase: 5 - Reputation & Dialogue (in_progress, 1/3 plans executed)
-Plan: 5-02 Dialogue System (complete)
-Status: In Progress
-Last activity: 2026-03-11 — Plan 02 (Dialogue System) completed
+Phase: 5 - Reputation & Dialogue (complete, 3/3 plans executed)
+Plan: 5-03 UI Integration (complete)
+Status: Complete
+Last activity: 2026-03-11 — Plan 03 (UI Integration) completed
 
-Progress: [x] [ ] [ ] (1/3 plans)
+Progress: [x] [x] [x] (3/3 plans)
 
 ---
 
@@ -49,10 +49,13 @@ Progress: [x] [ ] [ ] (1/3 plans)
 | Phases defined | 3 |
 | Requirements mapped | 9/9 |
 | Plans created | 3 |
-| Plans complete | 1 |
+| Plans complete | 3 |
 | 5-02 duration | 2m 14s |
 | 5-02 tasks | 5/5 |
 | 5-02 tests | 44 |
+| 5-03 duration | 4m 22s |
+| 5-03 tasks | 7/7 |
+| 5-03 tests | 204 |
 
 ---
 
@@ -64,7 +67,8 @@ Progress: [x] [ ] [ ] (1/3 plans)
 - Trait generation: hash name key -> 4 axes (0-100); reuses existing seed/name infrastructure
 - Dialogue: template-based (24 templates), trait-vector selection; no branching trees
 - Reputation: simple 0-10 counter per creature; threshold reactions at defined breakpoints
-- Research flags: dialogue template format (JSON vs code), trait bucketing (0-100 vs low/med/high), threshold tuning
+- UI integration: Talk wedge in radial menu, speech bubbles with fade, auto-greet on first visit, +1 star feedback
+- Gamepedia: 22 topics (added Dialogue + Reputation under World)
 
 ---
 
@@ -78,13 +82,14 @@ Progress: [x] [ ] [ ] (1/3 plans)
 | Auto-save on quit | No manual save step; reduces friction |
 | 24 templates across 5 tiers | 4 stranger + 5x4 other tiers; trait-temp word bank selection |
 | md5 seeding for dialogue | Same approach as traits.py; deterministic without coupling RNG |
+| Dialogue + Reputation under World group | Keep gamepedia structure flat, not a separate Creatures group |
 
 ---
 
 ## Session Continuity
 
-**Last activity:** Completed Plan 5-02 (Dialogue System)
-**Next action:** Execute remaining Phase 5 plans (01 Reputation, 03 UI Integration)
+**Last activity:** Completed Plan 5-03 (UI Integration)
+**Next action:** Phase 5 complete. Proceed to next phase or milestone wrap-up.
 
 ---
 
