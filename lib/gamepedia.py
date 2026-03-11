@@ -20,6 +20,10 @@ Ctrl +/-  Zoom in/out"""),
 Click a planet in the viewport to fly there. Hold-click to open the \
 radial menu instead.
 
+The radial menu has two active wedges: "Info" (right) opens the detail \
+panel, and "Talk" (top) starts a conversation with the creature. Move \
+to a wedge and release the mouse button to select it.
+
 Click a name in the sidebar to fly to that planet.
 
 Drag anywhere in the viewport to rotate your view freely.
@@ -107,7 +111,42 @@ Every planet has a unique creature avatar. You'll see it in the sidebar \
 next to each name, in hover tooltips, and at large size in the detail panel.
 
 Each creature has a distinct body shape, appendages (horns, fins, limbs, \
-spikes), accent-colored markings, and eyes. No two look alike."""),
+spikes), accent-colored markings, and eyes. No two look alike.
+
+Every creature also has four personality traits (aggressive-passive, \
+curious-aloof, friendly-hostile, brave-fearful) that influence how \
+they look and what they say when you talk to them."""),
+        ("Dialogue", """\
+Hold-click a planet and select the "Talk" wedge to have a conversation \
+with its creature. Each creature speaks differently based on its \
+personality traits and how well it knows you.
+
+Friendly creatures greet you warmly; hostile ones may tell you to leave. \
+Curious creatures ask questions about your travels; aloof ones stay \
+silent. The creature's bravery and aggression shape their tone and \
+word choice.
+
+When you first arrive at a planet, the creature gives a brief greeting \
+automatically. Use Talk from the radial menu for deeper conversation.
+
+At high reputation (Devoted tier), creatures share lore about the \
+4-sphere's geometry and the nature of S3 space."""),
+        ("Reputation", """\
+Each creature tracks how well it knows you on a scale from 0 to 10. \
+Your reputation increases by visiting and talking.
+
+The five reputation tiers are:
+  0        Stranger   -- wary, short responses
+  1-2      Acquaintance  -- polite but distant
+  3-5      Familiar   -- comfortable, more talkative
+  6-8      Friend     -- warm, shares thoughts
+  9-10     Devoted    -- deep connection, shares lore
+
+Your first visit to a planet grants +1 reputation. Using the Talk \
+wedge grants another +1 per visit (once per visit only). Reputation \
+is shown as stars in the detail panel.
+
+A brief "+1" flash appears whenever your reputation increases."""),
     ]),
     ("Audio", [
         ("Procedural Music", """\
@@ -198,10 +237,11 @@ viewport with a white circle outline."""),
         ("Detail Panel & Radial Menu", """\
 Hold-click (don't release immediately) on a planet to pop open a \
 radial menu. Move to the "Info" wedge and release to open the detail \
-panel.
+panel. Move to the "Talk" wedge to start a conversation.
 
-The panel shows a large planet sprite and identicon, the planet's \
-name, exact distance, and full 4D coordinates (x, y, z, w).
+The detail panel shows a large planet sprite and identicon, the \
+planet's name, exact distance, full 4D coordinates (x, y, z, w), \
+and your reputation with that creature (shown as stars).
 
 Click anywhere else to dismiss the panel."""),
     ]),

@@ -68,7 +68,7 @@ class TestGamepediaClickSelect(unittest.TestCase):
         self.assertEqual(result, 3)
 
     def test_click_selects_last_topic(self):
-        """Click center of last topic row -> flat_idx 19."""
+        """Click center of last topic row -> last flat_idx."""
         positions = compute_topic_positions(GAMEPEDIA_CONTENT)
         last_idx = len(positions) - 1
         _, y_start, y_end = positions[last_idx]
@@ -76,7 +76,7 @@ class TestGamepediaClickSelect(unittest.TestCase):
         my = (y_start + y_end) // 2
         result = resolve_click(mx, my, GAMEPEDIA_CONTENT)
         self.assertEqual(result, last_idx)
-        self.assertEqual(last_idx, 19)
+        self.assertEqual(last_idx, 21)
 
     def test_click_on_group_header_selects_nothing(self):
         """Click on first group header row (Controls) -> no selection."""
@@ -107,8 +107,8 @@ class TestGamepediaClickSelect(unittest.TestCase):
             )
 
     def test_flat_list_length(self):
-        """Sanity check: _gamepedia_flat has exactly 20 entries."""
-        self.assertEqual(len(_gamepedia_flat), 20)
+        """Sanity check: _gamepedia_flat has exactly 22 entries."""
+        self.assertEqual(len(_gamepedia_flat), 22)
 
     def test_flat_list_matches_content_order(self):
         """_gamepedia_flat order matches iteration over GAMEPEDIA_CONTENT."""
