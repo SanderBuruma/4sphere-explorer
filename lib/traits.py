@@ -39,7 +39,7 @@ def generate_traits(name_key):
     digest = hashlib.md5(int(name_key).to_bytes(8, "little")).digest()
     traits = {}
     for i, axis in enumerate(TRAIT_AXES):
-        # 4 bytes per axis -> int mod 101 for range [0, 100]
+        # 4 bytes per axis → int mod 101 for range [0, 100]
         val = int.from_bytes(digest[i * 4:(i + 1) * 4], "little") % 101
         traits[axis] = val
     return traits
