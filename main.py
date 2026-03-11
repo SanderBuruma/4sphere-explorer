@@ -930,10 +930,15 @@ while running:
             name = get_name(inspected_planet_idx)
             coords = planets[inspected_planet_idx]
 
+            rep = get_reputation(reputation_store, inspected_planet_idx)
+            rep_score = rep["score"]
+            rep_stars = "\u2605" * rep_score + "\u2606" * (10 - rep_score)
             lines = [
                 name,
                 f"Dist: {format_dist(panel_dist)}",
                 f"4D: ({coords[0]:+.3f}, {coords[1]:+.3f}, {coords[2]:+.3f}, {coords[3]:+.3f})",
+                f"Rep: {rep_stars} {get_tier(rep_score)} ({rep_score}/10)",
+                f"Visits: {rep['visits']}",
             ]
 
             # Measure panel size (including sprite area at top)
