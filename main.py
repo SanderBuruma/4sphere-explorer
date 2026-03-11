@@ -18,6 +18,7 @@ from lib.gamepedia import (
     GP_LEFT_X, GP_LEFT_W, GP_TOP_Y, GP_LINE_H,
     GAMEPEDIA_CONTENT, _gamepedia_flat, word_wrap_text,
 )
+from lib.reputation import get_reputation, get_tier, record_visit
 from sphere import (
     random_point_on_s3,
     angular_distance,
@@ -105,6 +106,9 @@ pop_animation_start_time = None
 # Auto-travel (Tab key) system
 visited_planets = set()  # Indices of planets already traveled-to
 visit_history = deque(maxlen=50)  # Ordered trail of visited planet indices
+
+# Reputation tracking: sparse dict of idx -> {score, visits, talked_this_visit}
+reputation_store = {}
 auto_travel_feedback = None  # (message, timestamp) or None
 auto_travel_feedback_duration = 2000  # milliseconds
 
@@ -498,6 +502,7 @@ while running:
             if travel_target_idx is not None:
                 visited_planets.add(travel_target_idx)
                 visit_history.append(travel_target_idx)
+                record_visit(reputation_store, travel_target_idx)
                 auto_travel_feedback = (f"Visited: {get_name(travel_target_idx)}", pygame.time.get_ticks())
                 print(f"Visited: {get_name(travel_target_idx)} ({len(visited_planets)} total)")
 
