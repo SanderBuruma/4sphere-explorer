@@ -1,139 +1,50 @@
 # Project: 4-Sphere Explorer
 
-Interactive exploration of a 4-dimensional sphere (S³) embedded/projected into our visual space.
-
-**Inspiration:** fsLh-NYhOoU transcript summary — high-dimensional geometry, sphere volume formulas, counterintuitive properties of 4D space.
-
----
-
-## Core Concept
-
-A 4-sphere (S³) is the 3D "surface" of a 4D ball — topologically equivalent to a circle (S¹, 1D surface of 2D disk) or standard sphere (S², 2D surface of 3D ball), but one dimension higher. The challenge is making it navigable and visualizable.
-
-**Goals:**
-- Traversable 4D navigation (rotating, moving across the surface)
-- Projection strategy: 4D → 3D → 2D for rendering
-- Intuitive controls for exploring 4D geometry
-- Visualize how 4D curvature/volume properties differ from 3D
-
----
+Interactive S³ (3-sphere) explorer — navigate the 3D surface of a 4D ball, projected to 2D via Pygame.
 
 ## Tech Stack
 
-- **Language:** Python
-- **Engine:** Pygame (established game framework)
-- **Math:** NumPy (4D rotations, projections)
-- **Venv:** standard ~/Projects/4sphere-explorer/venv
+Python, Pygame, NumPy. Venv at `~/Projects/4sphere-explorer/venv`.
 
----
+## Files
 
-## 4-Sphere Representation
-
-**Parametrization (Hyperspherical coordinates):**
-- θ₁, θ₂, θ₃ ∈ [0, π]
-- φ ∈ [0, 2π]
-
-Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² = 1.
-
-**Projection to 3D:**
-- Stereographic projection (preserves angles locally)
-- Or simple orthogonal projection + rotation visualization
-
-**Navigation:**
-- Rotations relative to camera's local orientation frame (persistent, co-rotated)
-- Keyboard/mouse input → frame rotation → update camera and tangent basis
-
----
-
-## Known Properties (from transcript)
-
-- S³ has 3-dimensional surface (the boundary)
-- Volume peaks at n=5, so 4D volume behavior is significant
-- Most volume is near the boundary (unusual for high-D)
-- Useful conceptually: appears in SU(2) group representations, quaternions, and topology
-
----
-
-## Current Implementation
-
-### Files
-- `main.py` — Game loop, rendering, UI, input handling, mutable game state
+- `main.py` — Game loop, rendering, UI, input, mutable state
 - `lib/constants.py` — Display/color/game constants, `distance_to_color()`, `format_dist()`
-- `lib/gamepedia.py` — Gamepedia content, layout constants (`GP_*`), `word_wrap_text()`
-- `lib/graphics.py` — Procedural creature generation (low-poly faceted bodies, appendages, accent markings, eyes)
-- `lib/planets.py` — Procedural rotating planet generation (two-tier equirect textures, hemisphere rendering, background preload worker)
-- `sphere.py` — S³ math (point generation, distance, slerp, tangent space projection, orientation frame rotation, name decoding, colors)
-- `audio.py` — Procedural techno ambient music (synthesis, caching, proximity-based playback)
-- `tests/test_sphere.py` — Sphere math, navigation, and name generation tests (22 tests)
-- `tests/test_audio.py` — Audio signal generation and quality tests (17 tests)
-- `tests/test_planets.py` — Procedural planet generation and rendering tests (22 tests)
-- `tests/test_gamepedia.py` — Gamepedia click geometry and word-wrap tests (12 tests)
-- `tests/test_eye_tracking.py` — Eye wander/tracking attention and blending tests (12 tests)
-- `.gitignore` — venv exclusions
+- `lib/gamepedia.py` — In-game encyclopedia content + layout (`GP_*` constants), `word_wrap_text()`
+- `lib/graphics.py` — Procedural creature generation (low-poly faceted, appendages, eyes)
+- `lib/planets.py` — Procedural rotating planets (two-tier equirect textures, background preload)
+- `lib/compass.py` — 4D compass widget: two great-circle rings (Y-axis blue, W-axis amber) projected from R⁴
+- `sphere.py` — S³ math (points, distance, slerp, tangent projection, orientation frame, names, colors)
+- `audio.py` — Procedural techno ambient (10 timbres, 12 scales, proximity playback)
+- `tests/` — test_sphere (22), test_audio (17), test_planets (22), test_gamepedia (12), test_eye_tracking (12)
 
-### Scale
-- **30,000 points** uniformly distributed on S³ surface
-- **FOV: 0.116 rad** (~6.6°) — tuned to show ~10 visible points at once
-- **Travel speed:** 0.00008 per frame (10x faster than previous 0.000008)
-- **Projection scale:** 2500 (10x original for narrow FOV)
-- **Camera distance:** 0.08 rad from player (reduced from 0.15 for tight framing)
+## Key Parameters
 
-### Features
-- **Procedural creatures:** Each point has a unique creature avatar with a low-poly faceted body (Delaunay triangulation), appendages (horns, fins, limbs, spikes), accent-colored markings (spots, dorsal ridge, belly, patches), and eyes with wandering/tracking behavior. 32×32 cached on-demand with LRU eviction. Generated from name key seed via `generate_creature(seed, size)` for any resolution
-- **Wandering eyes:** Creature eyes wander organically when the mouse is idle, using incommensurate harmonic oscillators for non-repeating paths. Mouse movement smoothly transitions eyes to cursor tracking via an exponentially-decayed attention system. Each creature wanders independently (per-seed phase offset) while both eyes on the same creature stay synced. Shared module-level state updated once per frame via `update_eye_tracking()`
-- **Lazy name generation:** 11.8M unique name space (4 regions: core+end+suffix+number, core+end+suffix, core+suffix+number, core+suffix). Numbers always appended after word suffixes, never replacing them. Keys sampled once at startup, decoded deterministically per point
-- **Tangent space projection:** Points projected into camera's local tangent plane, so visible points cluster around crosshair
-- **Procedural rotating planets:** Each point is a unique procedurally generated planet with smooth gradient noise textures (12 color palettes, seeded by name key). Planets rotate (20s period, per-point phase offset). Two-tier textures: low-res (32×64) for main view (max 6 per frame), high-res (128×256) preloaded on background thread for all visible points. Hemisphere rendered via normalized UV lookup with edge darkening and highlight shading. Falls back to circles for uncached planets
-- **Unified point coloring:** All UI elements (3D viewport, tooltip, detail panel, sidebar, inspection ring) use the same color per point. No distance-based brightness or hue modulation — color is purely from the point's identity
-- **Four view modes** (toggle V):
-  - 0: Assigned — permanent random HSV colors per point
-  - 1: 4D Position — color derived from normalized relative 4D direction
-  - 2: XYZ Projection — 3D position relative to player, W coordinate → blue/white/red color
-  - 3: XYZ Fixed-Y — like mode 2 but Y axis locked to absolute [0,1,0,0], only horizontal panning
-- **Navigation:** Click points in view or list to travel (slerp interpolation); WASD/QE rotate camera relative to current orientation
-  - Travel completes at 0.02 rad proximity (snap to target) → pop animation (400ms expanding fade-out circle)
-  - Travel target marked with `<` in list and 3 rotating blue triangles in view (6s rotation)
-  - **Travel queue:** Clicking a new target while traveling queues it; travel starts after arriving at current target. Queued target shown with `<<` in list (blue)
-- **UI:** Crosshair at camera position, scrollable distance-sorted list with point colors, hover tooltips with creature avatars
-- **Detail panel:** Radial menu "Info" option shows large (64×64) rotating planet with tint color, plus name, distance, 4D coordinates, and audio parameters
-- **Gamepedia (F1):** In-game encyclopedia overlay. Left panel lists topics grouped by category (Controls, Navigation, World, Audio, 4D Geometry, UI) with per-group accent colors. Right panel shows word-wrapped scrollable content. Click topics or use UP/DOWN to navigate, mouse wheel to scroll content. All game input suppressed while open. Layout constants (`GP_LEFT_X`, `GP_LEFT_W`, `GP_TOP_Y`, `GP_LINE_H`) shared between click handler and renderer. Content in `GAMEPEDIA_CONTENT` must be kept up to date when features change.
-- **Distance display:** mrad for distances < 1 rad, rad for >= 1 rad
-- **Procedural ambient music:** Each point has a unique techno soundscape (seeded by name key), audible within 10 mrad (`AUDIO_RANGE`). Volume fades linearly with distance. Ten timbres: supersaw pad, acid bass, synth pluck, FM bass, noise drone, ring mod, PWM, organ, wavefold, stutter — root 33–466 Hz (MIDI 25–70), harmonics capped at 700 Hz with rolloff above 580 Hz. Twelve scales (pentatonic, dorian, phrygian, whole tone, blues, harmonic minor, lydian, mixolydian, locrian, japanese in-sen). Five tempo levels (0.08–5.0s). Tone frequencies octave-folded above 580 Hz. 2.14M+ discrete configurations. RMS-normalized for consistent perceived loudness. 15-second seamless loops with crossfade
+30,000 points on S³ | FOV 0.116 rad (~6.6°) | Travel speed 0.00008/frame | Projection scale 2500 | Camera dist 0.08 rad
 
-### Controls
-| Input | Action |
-|-------|--------|
-| W/S | Rotate up/down (relative to view) |
-| A/D | Rotate left/right (relative to view) |
-| Q/E | Rotate in 4D depth |
-| V | Cycle view mode (Assigned → 4D Position → XYZ Projection → XYZ Fixed-Y) |
-| Ctrl +/- or scroll | Zoom in/out |
-| UP/DOWN | Scroll point list |
-| Drag | Rotate camera (relative to view) |
-| Left click (view) | Travel to nearest point |
-| Left click (list) | Travel to selected point |
-| F1 | Toggle Gamepedia encyclopedia |
+## Architecture
 
----
+- **Orientation frame:** 4×4 orthogonal matrix (row 0 = camera, rows 1-3 = tangent basis). `rotate_frame()` applies planar rotations, `reorthogonalize_frame()` corrects drift via Gram-Schmidt from current frame vectors
+- **Tangent projection:** 3 basis vectors ⊥ camera in ℝ⁴, points projected onto basis scaled by angular distance
+- **Name keys:** `np.random.choice(11.8M, 30000, replace=False)` with seed 42 — deterministic, collision-free
+- **Lazy caching:** Creatures, names, planets cached with LRU eviction
+- **Planet pipeline:** Low-res (32×64) on main thread (6/frame budget), high-res (128×256) via background worker
+- **Audio:** `generate_signal()` → raw float64 (testable), `generate_sound()` → pygame Sound. RMS-normalized, 15s seamless loops
+- **Compass:** Two great circles sampled at 64 points, projected through orientation frame. Front arcs bright, back arcs dim/dashed. Pole labels at Y±/W± positions
 
-## Implementation Notes
+## Controls
 
-- **Persistent orientation frame:** 4×4 orthogonal matrix (row 0 = camera, rows 1-3 = tangent basis). `rotate_frame()` applies exact planar rotations in the (camera, basis[i]) plane, co-rotating camera and tangent vectors. `reorthogonalize_frame()` corrects numerical drift via Gram-Schmidt from current frame vectors (not fixed standard basis), preserving orientation continuity. This replaces the old per-frame Gram-Schmidt approach which caused direction flipping when the camera moved away from standard basis axes.
-- **Tangent space projection:** 3 orthonormal basis vectors from orientation frame, perpendicular to camera in ℝ⁴, points projected onto basis scaled by angular distance
-- **Name key sampling:** `np.random.choice(TOTAL_NAMES, 30000, replace=False)` at startup with fixed seed (42) ensures deterministic, collision-free 30k unique names from 11.8M name space
-- **Lazy caching:** Creatures, names, and planet textures cached separately with LRU eviction in `update_visible()` to keep memory bounded
-- **Planet rendering pipeline:** Two-tier: `generate_equirect_texture(seed, h, w)` produces uint8 arrays via vectorized Perlin noise (`_perlin3_batch` numpy fallback when C `noise` lib unavailable) + gradient LUT. Low-res (32×64) generated on main thread (budget 6/frame), high-res (128×256) generated by background worker thread for all visible points (queue-based, 100 entry cache cap ~10MB). `render_planet_frame()` samples hemisphere via normalized UV arrays (resolution-independent, bilinear for ≥48px). Tint via `BLEND_MULT` preserves point color identity
-- **Travel completion:** Snaps to target at < 0.02 rad proximity, fires pop animation. If a queued target exists, immediately begins traveling to it
-- **Audio synthesis:** `generate_signal()` returns raw float64 array (testable without pygame). `generate_sound()` wraps it into a `pygame.mixer.Sound`. Ten timbre functions each take `(freq, t, rng, tempo_range)`. `_rolloff(h)` attenuates harmonics linearly between 580–700 Hz to keep energy warm. Acid resonance uses proper phase accumulation (`np.cumsum`) instead of `freq*t`. Ring mod filters ratios to keep both sum and difference frequencies below 580 Hz, with full sideband suppression above. DC offset removed before RMS normalization to target 0.25. `update_audio()` manages channel allocation per frame based on proximity
-- Keep 4D rotation math clean and testable
-- Minimize over-engineering: navigation + rendering first, fancy visuals second
+W/S up/down, A/D left/right, Q/E 4D depth, V cycle view mode, Ctrl+/-/scroll zoom, UP/DOWN scroll list, drag rotate, click travel, F1 Gamepedia
 
----
+## View Modes (V)
 
-## Project-Specific Rules
+0: Assigned (random HSV) | 1: 4D Position | 2: XYZ Projection | 3: XYZ Fixed-Y
 
-- **Math correctness:** Test 4D rotations carefully. Quaternion vs. matrix representation choice will impact implementation.
-- **Gamepedia maintenance:** When adding or changing features, update the corresponding `GAMEPEDIA_CONTENT` entries in `lib/gamepedia.py` to keep the in-game encyclopedia accurate. Also update `tests/test_gamepedia.py` if topic structure changes (group/topic counts).
-- **No commits without explicit request.** (Standard rule applies.)
-- **Iterative:** Expect this to evolve — start with basic traversal, then refine projection/rendering.
+## Rules
 
+- **No commits without explicit request**
+- **Math correctness:** Test 4D rotations carefully. Clamp dot products to [-1,1] before arccos
+- **Compass math:** Fixed standard basis [1,0,0,0] etc. — never the player frame, never reorthogonalize reference axes
+- **Gamepedia maintenance:** Update `GAMEPEDIA_CONTENT` in `lib/gamepedia.py` when features change. Update `tests/test_gamepedia.py` if topic structure changes
+- **Planning docs:** `.planning/` artifacts should be committed alongside implementation changes, not left as untracked files
+- **Iterative:** Start with basic traversal, refine projection/rendering
