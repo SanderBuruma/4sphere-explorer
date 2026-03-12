@@ -195,8 +195,9 @@ search_active = False
 
 # Gamepedia state
 gamepedia_open = False
-gamepedia_selected_topic = 0
+gamepedia_selected_topic = -1
 gamepedia_scroll = 0
+gamepedia_collapsed_groups = set(g for g, _ in GAMEPEDIA_CONTENT)  # all collapsed by default
 
 def apply_search_filter(search_query):
     """Filter visible_indices by name prefix match.
@@ -324,14 +325,33 @@ while running:
             if gamepedia_open:
                 if event.key == pygame.K_F1 or event.key == pygame.K_ESCAPE:
                     gamepedia_open = False
-                elif event.key == pygame.K_UP:
-                    gamepedia_selected_topic = max(0, gamepedia_selected_topic - 1)
-                    gamepedia_scroll = 0
-                elif event.key == pygame.K_DOWN:
-                    gamepedia_selected_topic = min(len(_gamepedia_flat) - 1, gamepedia_selected_topic + 1)
-                    gamepedia_scroll = 0
+                elif event.key in (pygame.K_UP, pygame.K_DOWN):
+                    _vis = []
+                    _ai = 0
+                    for _gn, _tops in GAMEPEDIA_CONTENT:
+                        for _ in _tops:
+                            if _gn not in gamepedia_collapsed_groups:
+                                _vis.append(_ai)
+                            _ai += 1
+                    if _vis:
+                        if event.key == pygame.K_UP:
+                            if gamepedia_selected_topic == -1:
+                                gamepedia_selected_topic = _vis[-1]
+                            elif gamepedia_selected_topic in _vis:
+                                _pos = _vis.index(gamepedia_selected_topic)
+                                gamepedia_selected_topic = _vis[max(0, _pos - 1)]
+                        else:
+                            if gamepedia_selected_topic == -1:
+                                gamepedia_selected_topic = _vis[0]
+                            elif gamepedia_selected_topic in _vis:
+                                _pos = _vis.index(gamepedia_selected_topic)
+                                gamepedia_selected_topic = _vis[min(len(_vis) - 1, _pos + 1)]
+                        gamepedia_scroll = 0
             elif event.key == pygame.K_F1:
                 gamepedia_open = True
+                gamepedia_selected_topic = -1
+                gamepedia_collapsed_groups = set(g for g, _ in GAMEPEDIA_CONTENT)
+                gamepedia_scroll = 0
             elif search_active:
                 if event.key == pygame.K_ESCAPE:
                     search_text = ""
@@ -374,18 +394,34 @@ while running:
             if gamepedia_open:
                 if event.button == 1:
                     mx, my = event.pos
-                    # Left panel click: select topic
+                    # Left panel click: toggle group header or select topic
                     if GP_LEFT_X <= mx <= GP_LEFT_X + GP_LEFT_W and my >= GP_TOP_Y:
                         y_cursor = GP_TOP_Y
-                        flat_idx = 0
+                        abs_flat_idx = 0
+                        hit = False
                         for gname, topics in GAMEPEDIA_CONTENT:
-                            y_cursor += GP_LINE_H  # group header
-                            for title, _text in topics:
-                                if y_cursor <= my < y_cursor + GP_LINE_H:
-                                    gamepedia_selected_topic = flat_idx
-                                    gamepedia_scroll = 0
-                                y_cursor += GP_LINE_H
-                                flat_idx += 1
+                            # Check group header hit
+                            if y_cursor <= my < y_cursor + GP_LINE_H:
+                                if gname in gamepedia_collapsed_groups:
+                                    gamepedia_collapsed_groups.discard(gname)
+                                else:
+                                    gamepedia_collapsed_groups.add(gname)
+                                hit = True
+                                break
+                            y_cursor += GP_LINE_H
+                            if gname not in gamepedia_collapsed_groups:
+                                for title, _text in topics:
+                                    if y_cursor <= my < y_cursor + GP_LINE_H:
+                                        gamepedia_selected_topic = abs_flat_idx
+                                        gamepedia_scroll = 0
+                                        hit = True
+                                        break
+                                    y_cursor += GP_LINE_H
+                                    abs_flat_idx += 1
+                                if hit:
+                                    break
+                            else:
+                                abs_flat_idx += len(topics)
             elif event.button == 1:  # Left click
                 mx, my = event.pos
                 # Dismiss detail panel on click outside it
@@ -1283,33 +1319,77 @@ while running:
 
         # Left panel: grouped topic list
         y_cursor = top_y
-        flat_idx = 0
+        abs_flat_idx = 0
         for gname, topics in GAMEPEDIA_CONTENT:
             accent = _gp_group_colors.get(gname, (140, 160, 200))
+            collapsed = gname in gamepedia_collapsed_groups
             # Group header with darkened accent bg + bar
             header_bg = (accent[0] // 6 + 10, accent[1] // 6 + 10, accent[2] // 6 + 15)
             pygame.draw.rect(screen, header_bg, (left_x - 4, y_cursor, left_w, line_h))
             pygame.draw.line(screen, accent, (left_x - 4, y_cursor), (left_x - 4, y_cursor + line_h - 1), 3)
-            header_surf = font.render(gname.upper(), True, accent)
+            indicator = "\u25b6" if collapsed else "\u25bc"
+            header_surf = font.render(f"{indicator} {gname.upper()}", True, accent)
             screen.blit(header_surf, (left_x + 4, y_cursor + 5))
             y_cursor += line_h
-            for title, _text in topics:
-                if flat_idx == gamepedia_selected_topic:
-                    # Selected: accent-tinted highlight
-                    sel_color = (accent[0] // 4 + 20, accent[1] // 4 + 20, accent[2] // 4 + 30)
-                    sel_rect = pygame.Rect(left_x - 4, y_cursor, left_w, line_h)
-                    pygame.draw.rect(screen, sel_color, sel_rect, border_radius=3)
-                    pygame.draw.rect(screen, accent, sel_rect, 1, border_radius=3)
-                    color = (255, 255, 255)
-                else:
-                    color = (180, 180, 200)
-                topic_surf = font.render(f"  {title}", True, color)
-                screen.blit(topic_surf, (left_x, y_cursor + 4))
-                y_cursor += line_h
-                flat_idx += 1
+            if collapsed:
+                abs_flat_idx += len(topics)
+            else:
+                for title, _text in topics:
+                    if abs_flat_idx == gamepedia_selected_topic:
+                        # Selected: accent-tinted highlight
+                        sel_color = (accent[0] // 4 + 20, accent[1] // 4 + 20, accent[2] // 4 + 30)
+                        sel_rect = pygame.Rect(left_x - 4, y_cursor, left_w, line_h)
+                        pygame.draw.rect(screen, sel_color, sel_rect, border_radius=3)
+                        pygame.draw.rect(screen, accent, sel_rect, 1, border_radius=3)
+                        color = (255, 255, 255)
+                    else:
+                        color = (180, 180, 200)
+                    topic_surf = font.render(f"  {title}", True, color)
+                    screen.blit(topic_surf, (left_x, y_cursor + 4))
+                    y_cursor += line_h
+                    abs_flat_idx += 1
 
-        # Right panel: selected topic content
-        if 0 <= gamepedia_selected_topic < len(_gamepedia_flat):
+        # Right panel: intro page or selected topic content
+        if gamepedia_selected_topic == -1:
+            # Intro page
+            intro_title = font_22.render("Welcome to Gamepedia", True, (200, 220, 255))
+            screen.blit(intro_title, (right_x, top_y))
+            pygame.draw.line(screen, (60, 80, 120), (right_x, top_y + 22), (right_x + right_w, top_y + 22))
+            intro_lines = [
+                "Gamepedia is your in-game reference for everything in",
+                "the 4-Sphere Explorer.",
+                "",
+                "HOW TO NAVIGATE",
+                "",
+                "  Click a category header on the left to expand it.",
+                "  Click a topic to read it in this panel.",
+                "  Use UP / DOWN to move between visible topics.",
+                "  Scroll the mouse wheel to scroll long articles.",
+                "  Press F1 or ESC to close.",
+                "",
+                "CATEGORIES",
+                "",
+            ]
+            for gn, gtopics in GAMEPEDIA_CONTENT:
+                intro_lines.append(f"  {gn}  ({len(gtopics)} topics)")
+            content_y = top_y + 32
+            content_line_h = 18
+            for i, line in enumerate(intro_lines):
+                is_cat = any(line.strip().startswith(gn) for gn, _ in GAMEPEDIA_CONTENT)
+                if is_cat:
+                    cat_color = (180, 200, 255)
+                    for gn, _ in GAMEPEDIA_CONTENT:
+                        if line.strip().startswith(gn):
+                            cat_color = _gp_group_colors.get(gn, (180, 200, 255))
+                            break
+                    color = cat_color
+                elif line.isupper() and line.strip():
+                    color = (180, 200, 255)
+                else:
+                    color = (200, 200, 210)
+                surf = font.render(line, True, color)
+                screen.blit(surf, (right_x, content_y + i * content_line_h))
+        elif 0 <= gamepedia_selected_topic < len(_gamepedia_flat):
             gname, title, text = _gamepedia_flat[gamepedia_selected_topic]
             accent = _gp_group_colors.get(gname, (180, 200, 255))
 
@@ -1355,7 +1435,7 @@ while running:
                 screen.blit(ind_surf, (right_x + right_w - ind_surf.get_width(), SCREEN_HEIGHT - 24))
 
         # Help hint
-        hint = font.render("F1/ESC: Close | UP/DOWN: Topics | Scroll: Content", True, (100, 100, 120))
+        hint = font.render("F1/ESC: Close | Click header: Expand/Collapse | UP/DOWN: Topics | Scroll: Content", True, (100, 100, 120))
         screen.blit(hint, (SCREEN_WIDTH // 2 - hint.get_width() // 2, SCREEN_HEIGHT - 24))
 
     pygame.display.flip()
