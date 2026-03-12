@@ -4,8 +4,8 @@ milestone: v1.2
 milestone_name: 4S Compass
 status: completed
 stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-03-12T19:30:00.000Z"
-last_activity: 2026-03-12 -- Completed quick task 3: collapsible Gamepedia categories + intro page
+last_updated: "2026-03-12T18:43:00.000Z"
+last_activity: 2026-03-12 -- Completed quick task 4: Gamepedia keyboard-only navigation
 progress:
   total_phases: 2
   completed_phases: 2
@@ -85,7 +85,7 @@ Progress: [██████████] 100%
 
 ## Session Continuity
 
-**Last activity:** 2026-03-12 -- Completed quick task 3: collapsible Gamepedia categories + intro page
+**Last activity:** 2026-03-12 -- Completed quick task 4: Gamepedia keyboard-only navigation
 **Next action:** /gsd:new-milestone to define next version
 
 ---
@@ -97,6 +97,7 @@ Progress: [██████████] 100%
 | 1 | Change compass to two NS circles pointing to Y and W axis intersections | 2026-03-12 | 9327ce3 | [1-change-compass-to-two-ns-circles-pointin](./quick/1-change-compass-to-two-ns-circles-pointin/) |
 | 2 | Fix Gamepedia Compass entry to describe two-ring widget | 2026-03-12 | ec1b169 | [2-fix-the-gamepedia-compass-entry](./quick/2-fix-the-gamepedia-compass-entry/) |
 | 3 | Collapsible Gamepedia categories + intro page | 2026-03-12 | a99f7e8 | [3-make-the-categories-in-the-gamepedia-col](./quick/3-make-the-categories-in-the-gamepedia-col/) |
+| 4 | Gamepedia keyboard-only navigation (cursor nav, Enter/Space, PgUp/Dn) | 2026-03-12 | 95bb273 | [4-the-gamepedia-should-be-navigable-withou](./quick/4-the-gamepedia-should-be-navigable-withou/) |
 
 ---
 
