@@ -1,109 +1,139 @@
 """
 Compass widget for 4D orientation HUD.
 
-Calculates heading (XZ plane), tilt (Y axis), and W-depth alignment
-from a fixed standard basis frame, then renders a three-indicator
-widget onto a pygame surface.
+Renders two great-circle rings projected from R^4 into 2D widget space:
+  - NS ring: great circle in the XY plane of R^4 (passes through Y-axis poles)
+  - W  ring: great circle in the XW plane of R^4 (passes through W-axis poles)
+
+Each ring is sampled as 64 points on S3, projected through the camera
+orientation frame, and drawn as a polyline. Arcs behind the camera are
+rendered dimmer to convey depth.
 
 Public API:
     render_compass(screen, orientation, x, y, size=120)
-    calculate_heading(camera_pos) -> float in [-pi, pi]
-    calculate_tilt(camera_pos) -> float in [0, pi/2]
-    calculate_w_alignment(camera_pos) -> float in [-1, 1]
 """
 
 import math
 import pygame
 
-# ---------------------------------------------------------------------------
-# Lerp animation state (module-level)
-# ---------------------------------------------------------------------------
-_needle_angle = 0.0
-_target_angle = 0.0
-_lerp_progress = 1.0      # start at completion so first frame snaps cleanly
-_LERP_DURATION_MS = 200.0
-
-# Timing state for dt calculation
-_last_render_ms = None    # None = not yet called
-
-# Font cache (keyed by point size)
+# Font cache keyed by point size
 _font_cache = {}
 
-# Cardinal directions: angle in radians, label text
-_CARDINALS = [
-    (0,               "X+"),
-    (math.pi / 2,     "Z+"),
-    (math.pi,         "X-"),
-    (3 * math.pi / 2, "Z-"),
-]
+# Number of sample points per ring
+_N = 64
+
+# Fixed plane vectors for each ring (unit vectors in R^4 as plain tuples)
+# NS ring: plane spanned by X=[1,0,0,0] and Y=[0,1,0,0]
+_NS_A = (1.0, 0.0, 0.0, 0.0)   # X axis
+_NS_B = (0.0, 1.0, 0.0, 0.0)   # Y axis (poles here)
+
+# W ring: plane spanned by X=[1,0,0,0] and W=[0,0,0,1]
+_W_A  = (1.0, 0.0, 0.0, 0.0)   # X axis
+_W_B  = (0.0, 0.0, 0.0, 1.0)   # W axis (poles here)
+
+# Ring colors
+_NS_COLOR_BRIGHT = (100, 180, 255)    # blue-white, front arcs
+_NS_COLOR_DIM    = (40,  80, 120)     # dimmed, back arcs
+_W_COLOR_BRIGHT  = (255, 160, 80)     # amber, front arcs
+_W_COLOR_DIM     = (120,  65, 25)     # dimmed, back arcs
 
 
 # ---------------------------------------------------------------------------
-# Calculation functions
+# Math helpers (no numpy — plain Python)
 # ---------------------------------------------------------------------------
 
-def calculate_heading(camera_pos):
-    """Return heading angle in [-pi, pi] from fixed X and Z axes.
+def _dot4(a, b):
+    """Dot product of two 4-element sequences."""
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] + a[3]*b[3]
 
-    Camera pointing along +X -> 0.
-    Camera pointing along +Z -> -pi/2.
+
+def _sample_ring(a, b):
+    """Return list of 64 points on the great circle cos(t)*a + sin(t)*b."""
+    step = 2.0 * math.pi / _N
+    pts = []
+    for i in range(_N):
+        t = i * step
+        c, s = math.cos(t), math.sin(t)
+        pts.append((
+            c * a[0] + s * b[0],
+            c * a[1] + s * b[1],
+            c * a[2] + s * b[2],
+            c * a[3] + s * b[3],
+        ))
+    return pts
+
+
+def _project(p, orientation, cx, cy, scale):
+    """Project a point p in R^4 to 2D widget coordinates.
+
+    Returns (wx, wy, front) where front = dot(p, camera) — positive means
+    the point is on the camera-facing hemisphere.
     """
-    return math.atan2(-float(camera_pos[2]), float(camera_pos[0]))
+    # orientation rows are numpy arrays; float() ensures plain Python arithmetic
+    cam  = orientation[0]
+    rgt  = orientation[1]
+    up   = orientation[2]
 
+    front = _dot4(p, cam)           # depth sign
+    right = _dot4(p, rgt)           # widget X
+    upv   = _dot4(p, up)            # widget Y
 
-def calculate_tilt(camera_pos):
-    """Return tilt relative to Y axis in [0, pi/2].
-
-    0 = camera aligned with Y axis.
-    pi/2 = camera perpendicular to Y axis.
-    """
-    y_comp = max(-1.0, min(1.0, float(camera_pos[1])))
-    return math.acos(abs(y_comp))
-
-
-def calculate_w_alignment(camera_pos):
-    """Return W-axis depth alignment in [-1, 1].
-
-    +1 = camera pointing along +W.
-    -1 = camera pointing along -W.
-    """
-    return max(-1.0, min(1.0, float(camera_pos[3])))
+    wx = cx + right * scale
+    wy = cy - upv   * scale
+    return wx, wy, front
 
 
 # ---------------------------------------------------------------------------
-# Needle Lerp animation
+# Ring drawing
 # ---------------------------------------------------------------------------
 
-def _update_needle(target_heading, dt_ms):
-    """Update module-level Lerp state for smooth needle animation."""
-    global _needle_angle, _target_angle, _lerp_progress
+def _draw_ring(surf, pts, orientation, cx, cy, scale, color_bright, color_dim):
+    """Draw a great-circle ring given its 64 sample points."""
+    projected = [_project(p, orientation, cx, cy, scale) for p in pts]
 
-    if abs(target_heading - _target_angle) > 0.001:
-        _target_angle = target_heading
-        _lerp_progress = 0.0
+    # Draw segments: each segment connects projected[i] to projected[(i+1) % N]
+    # Segment depth sign = average of the two endpoint fronts
+    dash_counter = 0
+    for i in range(_N):
+        wx0, wy0, f0 = projected[i]
+        wx1, wy1, f1 = projected[(i + 1) % _N]
+        avg_front = (f0 + f1) * 0.5
 
-    if _lerp_progress < 1.0:
-        _lerp_progress = min(1.0, _lerp_progress + dt_ms / _LERP_DURATION_MS)
+        if avg_front >= 0:
+            pygame.draw.line(surf, color_bright,
+                             (int(wx0), int(wy0)), (int(wx1), int(wy1)), 2)
+        else:
+            # Dashed: draw every other segment
+            if dash_counter % 2 == 0:
+                pygame.draw.line(surf, color_dim,
+                                 (int(wx0), int(wy0)), (int(wx1), int(wy1)), 1)
+            dash_counter += 1
 
-        # Shortest-path wraparound
-        delta = _target_angle - _needle_angle
-        if delta > math.pi:
-            delta -= 2 * math.pi
-        elif delta < -math.pi:
-            delta += 2 * math.pi
 
-        _needle_angle += delta * _lerp_progress
+def _draw_pole(surf, pole_vec, orientation, cx, cy, scale, color, label, font):
+    """Draw a small circle and label at the projected position of a pole vector."""
+    wx, wy, front = _project(pole_vec, orientation, cx, cy, scale)
+    # Dim the dot when behind the camera
+    dot_color = color if front >= 0 else tuple(max(0, c // 3) for c in color)
+    pygame.draw.circle(surf, dot_color, (int(wx), int(wy)), 3)
 
-        if _lerp_progress >= 1.0:
-            _needle_angle = _target_angle
+    label_surf = font.render(label, True, dot_color)
+    # Offset label slightly away from center
+    dx = wx - cx
+    dy = wy - cy
+    dist = math.sqrt(dx*dx + dy*dy) or 1.0
+    offset = 9
+    lx = int(wx + (dx / dist) * offset)
+    ly = int(wy + (dy / dist) * offset)
+    surf.blit(label_surf, label_surf.get_rect(center=(lx, ly)))
 
 
 # ---------------------------------------------------------------------------
-# Render
+# Public API
 # ---------------------------------------------------------------------------
 
 def render_compass(screen, orientation, x, y, size=120):
-    """Draw the compass widget onto screen at (x, y).
+    """Draw the two-ring compass widget onto screen at (x, y).
 
     Parameters
     ----------
@@ -114,25 +144,19 @@ def render_compass(screen, orientation, x, y, size=120):
     x, y : int  Top-left position on screen.
     size : int  Widget width and height in pixels (default 120).
     """
-    global _last_render_ms
+    cx = size // 2
+    cy = size // 2
+    scale = size * 0.38
 
-    # Delta time
-    now_ms = pygame.time.get_ticks()
-    if _last_render_ms is None:
-        _last_render_ms = now_ms
-        dt_ms = 16.0
-    else:
-        dt_ms = float(max(1, min(100, now_ms - _last_render_ms)))
-        _last_render_ms = now_ms
+    # Pre-sample rings once (could be cached but 64*2 is trivial)
+    ns_pts = _sample_ring(_NS_A, _NS_B)
+    w_pts  = _sample_ring(_W_A,  _W_B)
 
-    # Extract camera direction from orientation frame
-    camera = orientation[0]
-
-    heading = calculate_heading(camera)
-    tilt = calculate_tilt(camera)
-    w_align = calculate_w_alignment(camera)
-
-    _update_needle(heading, dt_ms)
+    # Font
+    font_size = max(9, size // 13)
+    if font_size not in _font_cache:
+        _font_cache[font_size] = pygame.font.Font(None, font_size)
+    font = _font_cache[font_size]
 
     # -----------------------------------------------------------------------
     # Build widget surface
@@ -144,114 +168,32 @@ def render_compass(screen, orientation, x, y, size=120):
     # Border
     pygame.draw.rect(widget_surf, (100, 100, 130, 100), (0, 0, size, size), 1, border_radius=6)
 
-    # -----------------------------------------------------------------------
-    # Compass rose (left-centre area)
-    # -----------------------------------------------------------------------
-    cx = int(size * 0.42)
-    cy = int(size * 0.50)
-    rose_radius = int(size * 0.30)
-
-    # Rose circle outline
-    pygame.draw.circle(widget_surf, (60, 65, 90), (cx, cy), rose_radius, 1)
-
-    # Cardinal tick marks + labels
-    tick_inner = rose_radius - max(3, size // 25)
-    label_font_size = max(10, size // 12)
-    if label_font_size not in _font_cache:
-        _font_cache[label_font_size] = pygame.font.Font(None, label_font_size)
-    label_font = _font_cache[label_font_size]
-    label_offset = rose_radius + max(6, size // 16)
-    for angle, text in _CARDINALS:
-        cos_a = math.cos(angle)
-        sin_a = math.sin(angle)
-        px_outer = cx + int(rose_radius * cos_a)
-        py_outer = cy - int(rose_radius * sin_a)
-        px_inner = cx + int(tick_inner * cos_a)
-        py_inner = cy - int(tick_inner * sin_a)
-        pygame.draw.line(widget_surf, (90, 95, 120), (px_inner, py_inner), (px_outer, py_outer), 1)
-        lx = cx + int(label_offset * cos_a)
-        ly = cy - int(label_offset * sin_a)
-        surf = label_font.render(text, True, (160, 165, 190))
-        widget_surf.blit(surf, surf.get_rect(center=(lx, ly)))
+    # Faint horizon reference circle
+    pygame.draw.circle(widget_surf, (60, 65, 90), (cx, cy), int(scale), 1)
 
     # -----------------------------------------------------------------------
-    # Needle
+    # Draw NS ring (blue-white)
     # -----------------------------------------------------------------------
-    needle_len = rose_radius * 0.85
-    nx = cx + int(needle_len * math.cos(_needle_angle))
-    ny = cy - int(needle_len * math.sin(_needle_angle))
+    _draw_ring(widget_surf, ns_pts, orientation, cx, cy, scale,
+               _NS_COLOR_BRIGHT, _NS_COLOR_DIM)
 
-    # Back stub (opposite direction, 1/4 length)
-    stub_len = needle_len / 4
-    sx = cx - int(stub_len * math.cos(_needle_angle))
-    sy = cy + int(stub_len * math.sin(_needle_angle))
-    pygame.draw.line(widget_surf, (120, 60, 40), (cx, cy), (sx, sy), 1)
-
-    # Main needle
-    pygame.draw.line(widget_surf, (255, 110, 80), (cx, cy), (nx, ny), 2)
-    # Tip dot
-    pygame.draw.circle(widget_surf, (255, 110, 80), (nx, ny), 3)
+    # NS pole markers: b = [0,1,0,0] -> "N" and -b -> "S"
+    _draw_pole(widget_surf, _NS_B, orientation, cx, cy, scale,
+               _NS_COLOR_BRIGHT, "N", font)
+    _draw_pole(widget_surf, (0.0, -1.0, 0.0, 0.0), orientation, cx, cy, scale,
+               _NS_COLOR_BRIGHT, "S", font)
 
     # -----------------------------------------------------------------------
-    # Tilt bar (right side)
+    # Draw W ring (amber)
     # -----------------------------------------------------------------------
-    bar_cx = int(size * 0.83)
-    bar_top = int(size * 0.20)
-    bar_bottom = int(size * 0.80)
-    bar_h = bar_bottom - bar_top
-    bar_w = max(6, size // 18)
-    bar_left = bar_cx - bar_w // 2
+    _draw_ring(widget_surf, w_pts, orientation, cx, cy, scale,
+               _W_COLOR_BRIGHT, _W_COLOR_DIM)
 
-    # Track outline
-    pygame.draw.rect(widget_surf, (60, 65, 90), (bar_left, bar_top, bar_w, bar_h), 1)
-
-    # Indicator position: tilt=0 (aligned with Y) = center, tilt=pi/2 = bottom
-    indicator_y = bar_top + int((tilt / (math.pi / 2)) * bar_h)
-    indicator_y = max(bar_top, min(bar_bottom, indicator_y))
-    pygame.draw.circle(widget_surf, (150, 160, 255), (bar_cx, indicator_y), 4)
-
-    # "Y" label above bar
-    small_font_size = max(9, size // 14)
-    if small_font_size not in _font_cache:
-        _font_cache[small_font_size] = pygame.font.Font(None, small_font_size)
-    small_font = _font_cache[small_font_size]
-    y_surf = small_font.render("Y", True, (150, 160, 255))
-    y_rect = y_surf.get_rect(center=(bar_cx, bar_top - max(6, size // 16)))
-    widget_surf.blit(y_surf, y_rect)
-
-    # -----------------------------------------------------------------------
-    # W gauge (top-left corner)
-    # -----------------------------------------------------------------------
-    w_cx = int(size * 0.17)
-    w_cy = int(size * 0.20)
-    w_radius = max(7, size // 15)
-
-    # Interpolate color: -1 = blue (80,80,220), 0 = neutral (140,140,140), +1 = red (220,80,80)
-    t = (w_align + 1.0) / 2.0   # map [-1,1] -> [0,1]
-    if t <= 0.5:
-        # blue to neutral
-        f = t / 0.5
-        w_color = (
-            int(80 + f * (140 - 80)),
-            int(80 + f * (140 - 80)),
-            int(220 + f * (140 - 220)),
-        )
-    else:
-        # neutral to red
-        f = (t - 0.5) / 0.5
-        w_color = (
-            int(140 + f * (220 - 140)),
-            int(140 + f * (80 - 140)),
-            int(140 + f * (80 - 140)),
-        )
-
-    pygame.draw.circle(widget_surf, w_color, (w_cx, w_cy), w_radius)
-    pygame.draw.circle(widget_surf, (100, 100, 130), (w_cx, w_cy), w_radius, 1)
-
-    # "W" label below gauge
-    w_surf = small_font.render("W", True, (160, 165, 190))
-    w_rect = w_surf.get_rect(center=(w_cx, w_cy + w_radius + max(5, size // 18)))
-    widget_surf.blit(w_surf, w_rect)
+    # W pole markers: b = [0,0,0,1] -> "W+" and -b -> "W-"
+    _draw_pole(widget_surf, _W_B, orientation, cx, cy, scale,
+               _W_COLOR_BRIGHT, "W+", font)
+    _draw_pole(widget_surf, (0.0, 0.0, 0.0, -1.0), orientation, cx, cy, scale,
+               _W_COLOR_BRIGHT, "W-", font)
 
     # -----------------------------------------------------------------------
     # Blit to screen
