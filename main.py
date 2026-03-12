@@ -54,9 +54,9 @@ pygame.display.set_caption("4-Sphere Explorer")
 pygame.display.set_icon(generate_creature(42, size=64)[0])
 
 clock = pygame.time.Clock()
-font = pygame.font.Font(None, 14)
-font_22 = pygame.font.Font(None, 22)
-font_28 = pygame.font.Font(None, 28)
+font = pygame.font.Font(None, 18)
+font_22 = pygame.font.Font(None, 26)
+font_28 = pygame.font.Font(None, 32)
 start_time = pygame.time.get_ticks()  # milliseconds since pygame init
 
 # Starfield: random 4D directions for parallax background
