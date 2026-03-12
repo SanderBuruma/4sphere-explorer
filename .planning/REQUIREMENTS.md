@@ -1,66 +1,63 @@
-# Requirements: v1.1 Gameplay Prototype
+# Requirements: 4-Sphere Explorer v1.2
 
-**Milestone:** v1.1 Gameplay Prototype
-**Created:** 2026-03-11
-**Status:** Defining
+**Defined:** 2026-03-12
+**Core Value:** Navigable, intuitive traversal of S3 -- making 4D geometry feel tangible
 
----
+## v1.2 Requirements
 
-## v1.1 Requirements
+### Compass Rose
 
-### Traits
+- [x] **COMP-01**: Compass rose in screen corner shows X+, X-, Z+, Z- cardinal labels relative to fixed standard basis axes
+- [x] **COMP-02**: Rotating needle indicates camera's heading direction in the XZ plane
+- [x] **COMP-03**: Needle rotation uses smooth Lerp animation (~200ms) with angle wraparound handling
 
-- [ ] **TRAIT-01**: Each creature has 4 seed-deterministic personality axes (aggressive-passive, curious-aloof, friendly-hostile, brave-fearful) scored 0-100
-- [ ] **TRAIT-02**: Creature traits are displayed in the radial menu info panel
-- [ ] **TRAIT-03**: Creature appearance/behavior subtly reflects personality traits (visual cues)
+### Orientation Indicators
 
-### Dialogue
+- [x] **ORIE-01**: Vertical bar alongside compass shows camera tilt relative to the Y axis
+- [x] **ORIE-02**: Depth gauge shows camera alignment with the W axis (color gradient or small indicator)
 
-- [ ] **DIAL-01**: Creatures produce procedural dialogue selected from templates based on their trait combination
-- [ ] **DIAL-02**: Dialogue tone shifts based on reputation level (friendly at high rep, evasive/hostile at low rep)
+### Widget Integration
 
-### Reputation
-
-- [ ] **REP-01**: Each creature tracks how many times the player has visited
-- [ ] **REP-02**: Each creature has a reputation score (0-10) that changes based on player actions
-- [ ] **REP-03**: Creatures react differently at reputation thresholds (behavior/dialogue changes)
-
-### Persistence
-
-- [ ] **SAVE-01**: Game state (reputation, visit counts, player position) saves to and loads from disk
-
----
+- [x] **WIDG-01**: Compass widget has semi-transparent background that doesn't obscure the view
+- [ ] **WIDG-02**: Compass hidden when Gamepedia overlay is open
+- [ ] **WIDG-03**: Compass renders only in default view mode (mode 0)
 
 ## Future Requirements
 
-- Trait compatibility between creatures (rival/mentor relationships)
-- Creature social networks (cross-references in dialogue)
-- Reputation affects audio timbre (warmer for liked, harsher for disliked)
-- Creatures reference past actions in dialogue
-- Relationship decay over time
+### Compass Enhancements
+
+- **COMP-04**: 8-point compass rose with intercardinal directions
+- **COMP-05**: Numeric heading/angle readouts
+- **WIDG-04**: Toggle compass visibility with C key
+- **WIDG-05**: Compass resizes with zoom level
 
 ## Out of Scope
 
-- LLM-generated dialogue — breaks determinism, adds API dependency, unnecessary cost
-- Branching dialogue trees — exponential complexity at 30k creature scale
-- Multiplayer reputation — solo exploration experience
-- Faction systems — keep reputation per-creature, not grouped
-
----
+| Feature | Reason |
+|---------|--------|
+| Travel target indicator on compass | Separate feature; compass is orientation-only |
+| Nearby planet radar pips | Different UI element; not a compass |
+| Compass in non-default view modes | Other view modes have their own visual indicators |
+| Full overlay / sphere projection | Scope creep; corner widget is the chosen form |
 
 ## Traceability
 
-| REQ-ID | Phase | Plan | Status |
-|--------|-------|------|--------|
-| TRAIT-01 | Phase 4 | — | Pending |
-| TRAIT-02 | Phase 4 | — | Pending |
-| TRAIT-03 | Phase 4 | — | Pending |
-| DIAL-01 | Phase 5 | — | Pending |
-| DIAL-02 | Phase 5 | — | Pending |
-| REP-01 | Phase 5 | — | Pending |
-| REP-02 | Phase 5 | — | Pending |
-| REP-03 | Phase 5 | — | Pending |
-| SAVE-01 | Phase 6 | — | Pending |
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| COMP-01 | Phase 7 | Complete |
+| COMP-02 | Phase 7 | Complete |
+| COMP-03 | Phase 7 | Complete |
+| ORIE-01 | Phase 7 | Complete |
+| ORIE-02 | Phase 7 | Complete |
+| WIDG-01 | Phase 7 | Complete |
+| WIDG-02 | Phase 8 | Pending |
+| WIDG-03 | Phase 8 | Pending |
+
+**Coverage:**
+- v1.2 requirements: 8 total
+- Mapped to phases: 8
+- Unmapped: 0
 
 ---
-*Last updated: 2026-03-11*
+*Requirements defined: 2026-03-12*
+*Last updated: 2026-03-12 after roadmap creation*
