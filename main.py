@@ -1236,8 +1236,9 @@ while running:
     status_text = font.render(status, True, TEXT_COLOR)
     screen.blit(status_text, (10, 10))
 
-    # Compass widget (always rendered; gamepedia overlay naturally covers it)
-    render_compass(screen, orientation, x=10, y=10, size=120)
+    # Compass widget — only in Assigned mode and when Gamepedia is closed
+    if view_mode == 0 and not gamepedia_open:
+        render_compass(screen, orientation, x=10, y=10, size=120)
 
     # Gamepedia overlay
     if gamepedia_open:

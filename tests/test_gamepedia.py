@@ -118,6 +118,16 @@ class TestGamepediaClickSelect(unittest.TestCase):
                 expected.append((gname, title, text))
         self.assertEqual(_gamepedia_flat, expected)
 
+    def test_compass_topic_has_visibility_note(self):
+        """Compass topic must document that it is only visible in Assigned mode."""
+        compass_text = None
+        for group_name, topics in GAMEPEDIA_CONTENT:
+            for title, text in topics:
+                if title == "Compass":
+                    compass_text = text
+        self.assertIsNotNone(compass_text, "Compass topic not found")
+        self.assertIn("Assigned color mode", compass_text)
+
 
 # ── Word wrap tests ────────────────────────────────────────────────────────
 

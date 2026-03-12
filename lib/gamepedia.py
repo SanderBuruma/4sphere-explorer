@@ -252,7 +252,8 @@ The next time you launch, you'll resume exactly where you left off.
 If the save file is missing or corrupted, the game starts fresh with \
 defaults — it will never crash on a bad save."""),
         ("Compass", """\
-The compass widget (top-left corner) shows your absolute 4D orientation on S3.
+The compass widget (top-left corner) shows your absolute 4D orientation on S3. \
+Only visible in Assigned color mode (V to cycle) -- hidden in other view modes and while Gamepedia is open.
 
 Compass Rose: The rotating needle points toward X+ in the XZ plane. \
 Cardinal labels X+, X-, Z+, Z- mark the fixed standard basis directions.
