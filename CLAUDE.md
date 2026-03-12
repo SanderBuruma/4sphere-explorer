@@ -45,6 +45,6 @@ W/S up/down, A/D left/right, Q/E 4D depth, V cycle view mode, Ctrl+/-/scroll zoo
 - **No commits without explicit request**
 - **Math correctness:** Test 4D rotations carefully. Clamp dot products to [-1,1] before arccos
 - **Compass math:** Fixed standard basis [1,0,0,0] etc. — never the player frame, never reorthogonalize reference axes
-- **Gamepedia maintenance:** Update `GAMEPEDIA_CONTENT` in `lib/gamepedia.py` when features change. Update `tests/test_gamepedia.py` if topic structure changes
+- **Gamepedia maintenance:** When changing gameplay aspects (controls, UI widgets, mechanics, audio, view modes), update the corresponding `GAMEPEDIA_CONTENT` entry in `lib/gamepedia.py` in the same change. Update `tests/test_gamepedia.py` if topic structure changes
 - **Planning docs:** `.planning/` artifacts should be committed alongside implementation changes, not left as untracked files
 - **Iterative:** Start with basic traversal, refine projection/rendering
