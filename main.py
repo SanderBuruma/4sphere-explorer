@@ -55,6 +55,8 @@ pygame.display.set_icon(generate_creature(42, size=64)[0])
 
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 14)
+font_22 = pygame.font.Font(None, 22)
+font_28 = pygame.font.Font(None, 28)
 start_time = pygame.time.get_ticks()  # milliseconds since pygame init
 
 # Starfield: random 4D directions for parallax background
@@ -651,7 +653,7 @@ while running:
                 continue
 
             # W→color: -1 to +1 maps blue→white→red
-            r, g, b = w_to_color(np.clip(w_vals[vi] / FOV_ANGLE, -1.0, 1.0))
+            r, g, b = w_to_color(max(-1.0, min(1.0, w_vals[vi] / FOV_ANGLE)))
 
             # Size by angular proximity
             angular_dist = visible_distances[vi]
@@ -711,10 +713,10 @@ while running:
                     if rel_norm > 1e-8:
                         rel = rel / rel_norm
                     # Map unit direction xyzw to RGB: x→R, y→G, z→B, w→brightness
-                    r = int(np.clip((rel[0] + 1.0) * 127.5, 0, 255))
-                    g = int(np.clip((rel[1] + 1.0) * 127.5, 0, 255))
-                    b = int(np.clip((rel[2] + 1.0) * 127.5, 0, 255))
-                    w_factor = 0.5 + 0.5 * np.clip((rel[3] + 1.0) / 2.0, 0, 1)
+                    r = int(max(0, min(255, (rel[0] + 1.0) * 127.5)))
+                    g = int(max(0, min(255, (rel[1] + 1.0) * 127.5)))
+                    b = int(max(0, min(255, (rel[2] + 1.0) * 127.5)))
+                    w_factor = 0.5 + 0.5 * max(0.0, min(1.0, (rel[3] + 1.0) / 2.0))
                     base_color = (int(r * w_factor), int(g * w_factor), int(b * w_factor))
 
                 color = base_color
@@ -1257,8 +1259,7 @@ while running:
         }
 
         # Title
-        title_font = pygame.font.Font(None, 28)
-        title_surf = title_font.render("GAMEPEDIA", True, (200, 220, 255))
+        title_surf = font_28.render("GAMEPEDIA", True, (200, 220, 255))
         screen.blit(title_surf, (SCREEN_WIDTH // 2 - title_surf.get_width() // 2, 16))
 
         # Subtle divider under title
@@ -1313,8 +1314,7 @@ while running:
             accent = _gp_group_colors.get(gname, (180, 200, 255))
 
             # Topic title with accent
-            topic_title_font = pygame.font.Font(None, 22)
-            tt_surf = topic_title_font.render(title, True, accent)
+            tt_surf = font_22.render(title, True, accent)
             group_surf = font.render(f"{gname}  >", True, (100, 110, 140))
             screen.blit(group_surf, (right_x, top_y + 3))
             screen.blit(tt_surf, (right_x + group_surf.get_width() + 6, top_y))

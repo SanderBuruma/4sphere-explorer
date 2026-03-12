@@ -14,15 +14,6 @@ Public API:
 
 import math
 import pygame
-import numpy as np
-
-# ---------------------------------------------------------------------------
-# Fixed standard basis axes — never modified
-# ---------------------------------------------------------------------------
-_AXIS_X = np.array([1.0, 0.0, 0.0, 0.0])
-_AXIS_Y = np.array([0.0, 1.0, 0.0, 0.0])
-_AXIS_Z = np.array([0.0, 0.0, 1.0, 0.0])
-_AXIS_W = np.array([0.0, 0.0, 0.0, 1.0])
 
 # ---------------------------------------------------------------------------
 # Lerp animation state (module-level)
@@ -35,6 +26,17 @@ _LERP_DURATION_MS = 200.0
 # Timing state for dt calculation
 _last_render_ms = None    # None = not yet called
 
+# Font cache (keyed by point size)
+_font_cache = {}
+
+# Cardinal directions: angle in radians, label text
+_CARDINALS = [
+    (0,               "X+"),
+    (math.pi / 2,     "Z+"),
+    (math.pi,         "X-"),
+    (3 * math.pi / 2, "Z-"),
+]
+
 
 # ---------------------------------------------------------------------------
 # Calculation functions
@@ -46,9 +48,7 @@ def calculate_heading(camera_pos):
     Camera pointing along +X -> 0.
     Camera pointing along +Z -> -pi/2.
     """
-    x_comp = float(np.dot(camera_pos, _AXIS_X))
-    z_comp = float(np.dot(camera_pos, _AXIS_Z))
-    return math.atan2(-z_comp, x_comp)
+    return math.atan2(-float(camera_pos[2]), float(camera_pos[0]))
 
 
 def calculate_tilt(camera_pos):
@@ -57,9 +57,8 @@ def calculate_tilt(camera_pos):
     0 = camera aligned with Y axis.
     pi/2 = camera perpendicular to Y axis.
     """
-    y_comp = float(np.dot(camera_pos, _AXIS_Y))
-    y_comp = float(np.clip(y_comp, -1.0, 1.0))
-    return float(np.arccos(abs(y_comp)))
+    y_comp = max(-1.0, min(1.0, float(camera_pos[1])))
+    return math.acos(abs(y_comp))
 
 
 def calculate_w_alignment(camera_pos):
@@ -68,8 +67,7 @@ def calculate_w_alignment(camera_pos):
     +1 = camera pointing along +W.
     -1 = camera pointing along -W.
     """
-    w_comp = float(np.dot(camera_pos, _AXIS_W))
-    return float(np.clip(w_comp, -1.0, 1.0))
+    return max(-1.0, min(1.0, float(camera_pos[3])))
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +122,7 @@ def render_compass(screen, orientation, x, y, size=120):
         _last_render_ms = now_ms
         dt_ms = 16.0
     else:
-        dt_ms = float(np.clip(now_ms - _last_render_ms, 1, 100))
+        dt_ms = float(max(1, min(100, now_ms - _last_render_ms)))
         _last_render_ms = now_ms
 
     # Extract camera direction from orientation frame
@@ -156,34 +154,25 @@ def render_compass(screen, orientation, x, y, size=120):
     # Rose circle outline
     pygame.draw.circle(widget_surf, (60, 65, 90), (cx, cy), rose_radius, 1)
 
-    # Cardinal tick marks
-    tick_outer = rose_radius
+    # Cardinal tick marks + labels
     tick_inner = rose_radius - max(3, size // 25)
-    for angle_deg in (0, 90, 180, 270):
-        a = math.radians(angle_deg)
-        cos_a = math.cos(a)
-        sin_a = math.sin(a)
-        px_outer = cx + int(tick_outer * cos_a)
-        py_outer = cy - int(tick_outer * sin_a)
+    label_font_size = max(10, size // 12)
+    if label_font_size not in _font_cache:
+        _font_cache[label_font_size] = pygame.font.Font(None, label_font_size)
+    label_font = _font_cache[label_font_size]
+    label_offset = rose_radius + max(6, size // 16)
+    for angle, text in _CARDINALS:
+        cos_a = math.cos(angle)
+        sin_a = math.sin(angle)
+        px_outer = cx + int(rose_radius * cos_a)
+        py_outer = cy - int(rose_radius * sin_a)
         px_inner = cx + int(tick_inner * cos_a)
         py_inner = cy - int(tick_inner * sin_a)
         pygame.draw.line(widget_surf, (90, 95, 120), (px_inner, py_inner), (px_outer, py_outer), 1)
-
-    # Cardinal labels: X+ at 0, Z+ at 90 (pi/2), X- at 180 (pi), Z- at 270 (3*pi/2)
-    label_font = pygame.font.Font(None, max(10, size // 12))
-    label_offset = rose_radius + max(6, size // 16)
-    labels = [
-        (0,           "X+"),
-        (math.pi / 2, "Z+"),
-        (math.pi,     "X-"),
-        (3 * math.pi / 2, "Z-"),
-    ]
-    for angle, text in labels:
-        lx = cx + int(label_offset * math.cos(angle))
-        ly = cy - int(label_offset * math.sin(angle))
+        lx = cx + int(label_offset * cos_a)
+        ly = cy - int(label_offset * sin_a)
         surf = label_font.render(text, True, (160, 165, 190))
-        rect = surf.get_rect(center=(lx, ly))
-        widget_surf.blit(surf, rect)
+        widget_surf.blit(surf, surf.get_rect(center=(lx, ly)))
 
     # -----------------------------------------------------------------------
     # Needle
@@ -218,12 +207,15 @@ def render_compass(screen, orientation, x, y, size=120):
 
     # Indicator position: tilt=0 (aligned with Y) = center, tilt=pi/2 = bottom
     indicator_y = bar_top + int((tilt / (math.pi / 2)) * bar_h)
-    indicator_y = int(np.clip(indicator_y, bar_top, bar_bottom))
+    indicator_y = max(bar_top, min(bar_bottom, indicator_y))
     pygame.draw.circle(widget_surf, (150, 160, 255), (bar_cx, indicator_y), 4)
 
     # "Y" label above bar
-    y_label_font = pygame.font.Font(None, max(9, size // 14))
-    y_surf = y_label_font.render("Y", True, (150, 160, 255))
+    small_font_size = max(9, size // 14)
+    if small_font_size not in _font_cache:
+        _font_cache[small_font_size] = pygame.font.Font(None, small_font_size)
+    small_font = _font_cache[small_font_size]
+    y_surf = small_font.render("Y", True, (150, 160, 255))
     y_rect = y_surf.get_rect(center=(bar_cx, bar_top - max(6, size // 16)))
     widget_surf.blit(y_surf, y_rect)
 
@@ -257,8 +249,7 @@ def render_compass(screen, orientation, x, y, size=120):
     pygame.draw.circle(widget_surf, (100, 100, 130), (w_cx, w_cy), w_radius, 1)
 
     # "W" label below gauge
-    w_label_font = pygame.font.Font(None, max(9, size // 14))
-    w_surf = w_label_font.render("W", True, (160, 165, 190))
+    w_surf = small_font.render("W", True, (160, 165, 190))
     w_rect = w_surf.get_rect(center=(w_cx, w_cy + w_radius + max(5, size // 18)))
     widget_surf.blit(w_surf, w_rect)
 
