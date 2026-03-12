@@ -76,7 +76,7 @@ class TestGamepediaClickSelect(unittest.TestCase):
         my = (y_start + y_end) // 2
         result = resolve_click(mx, my, GAMEPEDIA_CONTENT)
         self.assertEqual(result, last_idx)
-        self.assertEqual(last_idx, 22)
+        self.assertEqual(last_idx, 23)
 
     def test_click_on_group_header_selects_nothing(self):
         """Click on first group header row (Controls) -> no selection."""
@@ -107,8 +107,8 @@ class TestGamepediaClickSelect(unittest.TestCase):
             )
 
     def test_flat_list_length(self):
-        """Sanity check: _gamepedia_flat has exactly 22 entries."""
-        self.assertEqual(len(_gamepedia_flat), 23)
+        """Sanity check: _gamepedia_flat has exactly 24 entries."""
+        self.assertEqual(len(_gamepedia_flat), 24)
 
     def test_flat_list_matches_content_order(self):
         """_gamepedia_flat order matches iteration over GAMEPEDIA_CONTENT."""

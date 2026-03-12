@@ -251,6 +251,20 @@ The next time you launch, you'll resume exactly where you left off.
 
 If the save file is missing or corrupted, the game starts fresh with \
 defaults — it will never crash on a bad save."""),
+        ("Compass", """\
+The compass widget (top-left corner) shows your absolute 4D orientation on S3.
+
+Compass Rose: The rotating needle points toward X+ in the XZ plane. \
+Cardinal labels X+, X-, Z+, Z- mark the fixed standard basis directions.
+
+Tilt Bar: The vertical bar on the right of the widget shows your Y-axis alignment. \
+Indicator at top = aligned with Y axis, at bottom = perpendicular.
+
+W Gauge: The small circle (top-left of widget) changes color based on your \
+W-axis alignment. Blue = pointing toward -W, red = toward +W, grey = perpendicular.
+
+All indicators use fixed reference axes, not your local camera frame -- \
+so the compass always shows where you are on S3 in absolute terms."""),
     ]),
 ]
 
