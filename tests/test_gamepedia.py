@@ -232,5 +232,66 @@ class TestWordWrap(unittest.TestCase):
         self.assertEqual(result, ["aaa", "bbb", "ccc", "dd ee"])
 
 
+# ── Keyboard nav helper ────────────────────────────────────────────────────
+
+def build_nav_order(content, collapsed_groups=None):
+    """Build unified nav order list: [("group", gname) | ("topic", abs_idx), ...]"""
+    if collapsed_groups is None:
+        collapsed_groups = set()
+    nav = []
+    abs_idx = 0
+    for gname, topics in content:
+        nav.append(("group", gname))
+        if gname not in collapsed_groups:
+            for _title, _text in topics:
+                nav.append(("topic", abs_idx))
+                abs_idx += 1
+        else:
+            abs_idx += len(topics)
+    return nav
+
+
+# ── Keyboard nav tests ─────────────────────────────────────────────────────
+
+class TestGamepediaKeyboardNav(unittest.TestCase):
+    """Tests for keyboard navigation order building logic."""
+
+    def test_all_expanded_starts_with_group(self):
+        """All expanded: first item is ("group", "Controls")."""
+        nav = build_nav_order(GAMEPEDIA_CONTENT)
+        self.assertEqual(nav[0], ("group", "Controls"))
+
+    def test_all_expanded_second_item_is_first_topic(self):
+        """All expanded: second item is ("topic", 0) (first topic in Controls)."""
+        nav = build_nav_order(GAMEPEDIA_CONTENT)
+        self.assertEqual(nav[1], ("topic", 0))
+
+    def test_all_collapsed_only_groups(self):
+        """All groups collapsed: nav contains only group rows."""
+        all_groups = {g for g, _ in GAMEPEDIA_CONTENT}
+        nav = build_nav_order(GAMEPEDIA_CONTENT, collapsed_groups=all_groups)
+        self.assertTrue(all(kind == "group" for kind, _ in nav))
+        self.assertEqual(len(nav), len(GAMEPEDIA_CONTENT))
+
+    def test_collapsing_one_group_removes_its_topics(self):
+        """Collapsing Controls removes its 3 topics but keeps the group row."""
+        collapsed = {"Controls"}
+        nav = build_nav_order(GAMEPEDIA_CONTENT, collapsed_groups=collapsed)
+        total_topics = len(_gamepedia_flat)
+        controls_topics = len(dict(GAMEPEDIA_CONTENT)["Controls"])
+        expected_len = len(GAMEPEDIA_CONTENT) + (total_topics - controls_topics)
+        self.assertEqual(len(nav), expected_len)
+        self.assertIn(("group", "Controls"), nav)
+        # No topics with abs_idx 0, 1, or 2 (Controls topics) should appear
+        for i in range(controls_topics):
+            self.assertNotIn(("topic", i), nav)
+
+    def test_nav_order_full_length_all_expanded(self):
+        """All expanded: nav length equals num_groups + num_topics."""
+        nav = build_nav_order(GAMEPEDIA_CONTENT)
+        expected = len(GAMEPEDIA_CONTENT) + len(_gamepedia_flat)
+        self.assertEqual(len(nav), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
