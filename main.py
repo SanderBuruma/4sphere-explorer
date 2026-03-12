@@ -18,6 +18,7 @@ from lib.gamepedia import (
     GP_LEFT_X, GP_LEFT_W, GP_TOP_Y, GP_LINE_H,
     GAMEPEDIA_CONTENT, _gamepedia_flat, word_wrap_text,
 )
+from lib.compass import render_compass
 from lib.reputation import get_reputation, get_tier, record_visit, record_talk
 from lib.persistence import save_game, load_game
 from lib.traits import generate_traits
@@ -1234,6 +1235,9 @@ while running:
     status = f"Visible: {len(visible_indices)} | View: {mode_label}"
     status_text = font.render(status, True, TEXT_COLOR)
     screen.blit(status_text, (10, 10))
+
+    # Compass widget (always rendered; gamepedia overlay naturally covers it)
+    render_compass(screen, orientation, x=10, y=10, size=120)
 
     # Gamepedia overlay
     if gamepedia_open:
