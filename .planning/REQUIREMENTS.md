@@ -19,8 +19,8 @@
 ### Widget Integration
 
 - [x] **WIDG-01**: Compass widget has semi-transparent background that doesn't obscure the view
-- [ ] **WIDG-02**: Compass hidden when Gamepedia overlay is open
-- [ ] **WIDG-03**: Compass renders only in default view mode (mode 0)
+- [x] **WIDG-02**: Compass hidden when Gamepedia overlay is open
+- [x] **WIDG-03**: Compass renders only in default view mode (mode 0)
 
 ## Future Requirements
 
@@ -50,8 +50,8 @@
 | ORIE-01 | Phase 7 | Complete |
 | ORIE-02 | Phase 7 | Complete |
 | WIDG-01 | Phase 7 | Complete |
-| WIDG-02 | Phase 8 | Pending |
-| WIDG-03 | Phase 8 | Pending |
+| WIDG-02 | Phase 8 | Complete |
+| WIDG-03 | Phase 8 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 8 total

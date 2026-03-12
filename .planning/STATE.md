@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: 4S Compass
-status: complete
-last_updated: "2026-03-12T05:34:00Z"
-last_activity: 2026-03-12 -- Completed 07-02-PLAN.md (render_compass wired into main.py, Gamepedia Compass topic added)
+status: completed
+last_updated: "2026-03-12T05:45:21.846Z"
+last_activity: 2026-03-12 -- Phase 7 complete, transitioning to Phase 8
 progress:
   total_phases: 2
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 2
+  total_plans: 3
+  completed_plans: 3
   percent: 100
 ---
 
@@ -26,18 +26,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Navigable, intuitive traversal of S3
-**Current focus:** Corner compass widget showing 4D orientation
+**Current focus:** Game integration — conditional compass rendering
 
 ---
 
 ## Current Position
 
-Phase: 7 (Compass Widget) -- COMPLETE
-Plan: 07-02 done (render_compass wired into main.py, Compass Gamepedia entry added)
-Status: Complete -- 2/2 plans done, v1.2 milestone shipped
-Last activity: 2026-03-12 -- Completed 07-02 (compass integration)
+Phase: 8 (Game Integration) -- COMPLETE
+Plan: 08-01 done (compass render guard + Gamepedia visibility note added)
+Status: Complete -- 1/1 plans done, v1.2 milestone fully shipped
+Last activity: 2026-03-12 -- Completed 08-01 (compass conditional rendering guards)
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 67%
 
 ---
 
@@ -69,6 +69,7 @@ Progress: [██████████] 100%
 | 200ms Lerp with shortest-path wraparound | Responsive feel, prevents spin past ±pi boundary |
 | render_compass before gamepedia block | Gamepedia overlay Z-order covers compass naturally without explicit guard |
 | No view_mode/gamepedia guards in 07-02 | Phase 8 (WIDG-02, WIDG-03) scope; widget renders every frame for now |
+| Compass guard: view_mode==0 and not gamepedia_open | WIDG-02 + WIDG-03 complete; clean one-line conditional before gamepedia block |
 
 ---
 
@@ -83,8 +84,8 @@ Progress: [██████████] 100%
 
 ## Session Continuity
 
-**Last activity:** 2026-03-12 -- Completed 07-02-PLAN.md (render_compass wired into main.py)
-**Next action:** v1.2 milestone complete -- plan Phase 8 if continuing
+**Last activity:** 2026-03-12 -- Completed 08-01 (compass render guard, Gamepedia text update)
+**Stopped at:** Completed 08-01-PLAN.md
 
 ---
 

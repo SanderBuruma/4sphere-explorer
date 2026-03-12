@@ -11,7 +11,7 @@
 ### v1.2 4S Compass (Phases 7-8)
 
 - [x] **Phase 7: Compass Widget** - Build and render the full 4D orientation widget (compass rose, Y bar, W gauge) (completed 2026-03-12)
-- [ ] **Phase 8: Game Integration** - Wire conditional rendering into game state (Gamepedia interop, view mode gate)
+- [x] **Phase 8: Game Integration** - Wire conditional rendering into game state (Gamepedia interop, view mode gate) (completed 2026-03-12)
 
 ## Phase Details
 
@@ -38,14 +38,17 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Opening the Gamepedia overlay (F1) causes the compass to disappear; closing it makes the compass reappear
   2. Cycling view modes with V shows the compass only in mode 0 (Assigned colors); switching to modes 1-3 hides it
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 08-01-PLAN.md -- Add view_mode/gamepedia_open guard to render_compass call, update Compass Gamepedia entry
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 7. Compass Widget | 2/2 | Complete   | 2026-03-12 |
-| 8. Game Integration | 0/? | Not started | - |
+| 8. Game Integration | 1/1 | Complete   | 2026-03-12 |
 
 ---
 
