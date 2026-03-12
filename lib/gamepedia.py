@@ -255,17 +255,17 @@ defaults — it will never crash on a bad save."""),
 The compass widget (top-left corner) shows your absolute 4D orientation on S3. \
 Only visible in Assigned color mode (V to cycle) -- hidden in other view modes and while Gamepedia is open.
 
-Compass Rose: The rotating needle points toward X+ in the XZ plane. \
-Cardinal labels X+, X-, Z+, Z- mark the fixed standard basis directions.
+NS Ring (blue-white): a great circle in the XY plane of R4. Its poles mark the \
+Y+ (N) and Y- (S) standard basis directions. As you move through S3, the ring \
+rotates to show how Y aligns with your current view.
 
-Tilt Bar: The vertical bar on the right of the widget shows your Y-axis alignment. \
-Indicator at top = aligned with Y axis, at bottom = perpendicular.
+W Ring (amber): a great circle in the XW plane of R4. Its poles mark the W+ and W- \
+directions -- the fourth dimension. It tells you how deep into W you are oriented.
 
-W Gauge: The small circle (top-left of widget) changes color based on your \
-W-axis alignment. Blue = pointing toward -W, red = toward +W, grey = perpendicular.
-
-All indicators use fixed reference axes, not your local camera frame -- \
-so the compass always shows where you are on S3 in absolute terms."""),
+On both rings, arcs facing toward you are drawn bright and solid; arcs facing \
+away are dim and dashed. A faint grey circle marks the widget center as a reference. \
+All axes are fixed standard basis -- the compass shows your absolute position on \
+S3, never relative to your travel direction."""),
     ]),
 ]
 
