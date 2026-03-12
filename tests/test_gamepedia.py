@@ -10,37 +10,51 @@ from lib.gamepedia import (
 
 # ── Helper functions ───────────────────────────────────────────────────────
 
-def resolve_click(mx, my, content):
+def resolve_click(mx, my, content, collapsed_groups=None):
     """Pure reimplementation of the gamepedia click-to-select logic from main.py.
 
-    Returns the flat_idx of the selected topic, or None if nothing was hit.
+    Returns the abs flat_idx of the selected topic, or None if nothing was hit.
+    Group header rows are not returned (they toggle collapse, not select a topic).
+    collapsed_groups: set of group names that are collapsed (default: empty = all expanded).
     """
+    if collapsed_groups is None:
+        collapsed_groups = set()
     if not (GP_LEFT_X <= mx <= GP_LEFT_X + GP_LEFT_W and my >= GP_TOP_Y):
         return None
     y_cursor = GP_TOP_Y
-    flat_idx = 0
-    selected = None
+    abs_flat_idx = 0
     for gname, topics in content:
         y_cursor += GP_LINE_H  # group header
+        if gname in collapsed_groups:
+            abs_flat_idx += len(topics)
+            continue
         for title, _text in topics:
             if y_cursor <= my < y_cursor + GP_LINE_H:
-                selected = flat_idx
+                return abs_flat_idx
             y_cursor += GP_LINE_H
-            flat_idx += 1
-    return selected
+            abs_flat_idx += 1
+    return None
 
 
-def compute_topic_positions(content):
-    """Compute (flat_idx, y_start, y_end) for every topic using the render layout."""
+def compute_topic_positions(content, collapsed_groups=None):
+    """Compute (abs_flat_idx, y_start, y_end) for every visible topic using the render layout.
+
+    collapsed_groups: set of group names that are collapsed (default: empty = all expanded).
+    """
+    if collapsed_groups is None:
+        collapsed_groups = set()
     positions = []
     y_cursor = GP_TOP_Y
-    flat_idx = 0
+    abs_flat_idx = 0
     for gname, topics in content:
         y_cursor += GP_LINE_H  # group header
+        if gname in collapsed_groups:
+            abs_flat_idx += len(topics)
+            continue
         for title, _text in topics:
-            positions.append((flat_idx, y_cursor, y_cursor + GP_LINE_H))
+            positions.append((abs_flat_idx, y_cursor, y_cursor + GP_LINE_H))
             y_cursor += GP_LINE_H
-            flat_idx += 1
+            abs_flat_idx += 1
     return positions
 
 
@@ -127,6 +141,50 @@ class TestGamepediaClickSelect(unittest.TestCase):
                     compass_text = text
         self.assertIsNotNone(compass_text, "Compass topic not found")
         self.assertIn("Assigned color mode", compass_text)
+
+
+# ── Collapse-behaviour tests ───────────────────────────────────────────────
+
+class TestGamepediaCollapse(unittest.TestCase):
+    """Tests for collapsed-group behaviour in click resolution and layout."""
+
+    def test_collapsed_group_topics_not_clickable(self):
+        """Topics in a collapsed group return None on click."""
+        # Collapse 'Controls' group — its topics should not be hit
+        collapsed = {"Controls"}
+        # Without collapsing, first topic (Keyboard) is at GP_TOP_Y + GP_LINE_H
+        # With Controls collapsed, clicking there should return None
+        mx = GP_LEFT_X + GP_LEFT_W // 2
+        my = GP_TOP_Y + GP_LINE_H + GP_LINE_H // 2  # where Keyboard row would be
+        result = resolve_click(mx, my, GAMEPEDIA_CONTENT, collapsed_groups=collapsed)
+        self.assertIsNone(result)
+
+    def test_collapsed_group_shifts_later_groups_up(self):
+        """Collapsing Controls shifts Navigation topics up by (num Controls topics) rows."""
+        # With Controls collapsed: Navigation header is at GP_TOP_Y + 1*line_h (Controls header)
+        # First Navigation topic (Travel & Slerp, abs_idx=3) is at GP_TOP_Y + 2*line_h
+        collapsed = {"Controls"}
+        positions = compute_topic_positions(GAMEPEDIA_CONTENT, collapsed_groups=collapsed)
+        # First position should be for abs_flat_idx=3 (Travel & Slerp)
+        abs_idx, y_start, y_end = positions[0]
+        self.assertEqual(abs_idx, 3)
+        # y_start = GP_TOP_Y + 2*GP_LINE_H (Controls header + Navigation header)
+        expected_y = GP_TOP_Y + 2 * GP_LINE_H
+        self.assertEqual(y_start, expected_y)
+
+    def test_all_collapsed_no_clickable_topics(self):
+        """With all groups collapsed, no topic click resolves."""
+        all_groups = {g for g, _ in GAMEPEDIA_CONTENT}
+        mx = GP_LEFT_X + GP_LEFT_W // 2
+        for my in range(GP_TOP_Y, GP_TOP_Y + 20 * GP_LINE_H, GP_LINE_H):
+            result = resolve_click(mx, my, GAMEPEDIA_CONTENT, collapsed_groups=all_groups)
+            self.assertIsNone(result, f"Expected None at y={my}, got {result}")
+
+    def test_partially_collapsed_positions(self):
+        """compute_topic_positions with all groups collapsed returns empty list."""
+        collapsed = {g for g, _ in GAMEPEDIA_CONTENT}
+        positions = compute_topic_positions(GAMEPEDIA_CONTENT, collapsed_groups=collapsed)
+        self.assertEqual(len(positions), 0)
 
 
 # ── Word wrap tests ────────────────────────────────────────────────────────
