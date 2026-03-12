@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: 4S Compass
-status: in_progress
-current_phase: 7
-current_plan: 1
-last_updated: "2026-03-12T05:30:00Z"
-last_activity: "Completed 07-01-PLAN.md"
+status: complete
+last_updated: "2026-03-12T05:34:00Z"
+last_activity: 2026-03-12 -- Completed 07-02-PLAN.md (render_compass wired into main.py, Gamepedia Compass topic added)
 progress:
   total_phases: 2
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
+  percent: 100
 ---
 
 # State: 4-Sphere Explorer
@@ -33,12 +32,12 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 
 ## Current Position
 
-Phase: 7 (Compass Widget) -- Plan 1 complete
-Plan: 07-01 done (lib/compass.py created)
-Status: In progress -- 1/2 plans complete
-Last activity: 2026-03-12 -- Completed 07-01 (compass module)
+Phase: 7 (Compass Widget) -- COMPLETE
+Plan: 07-02 done (render_compass wired into main.py, Compass Gamepedia entry added)
+Status: Complete -- 2/2 plans done, v1.2 milestone shipped
+Last activity: 2026-03-12 -- Completed 07-02 (compass integration)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████████] 100%
 
 ---
 
@@ -68,6 +67,8 @@ Progress: [█████░░░░░] 50%
 | heading = atan2(-z_comp, x_comp) | +X = 0 and +Z = -pi/2, clockwise from above |
 | tilt = arccos(abs(y_comp)) | Always non-negative regardless of Y sign |
 | 200ms Lerp with shortest-path wraparound | Responsive feel, prevents spin past ±pi boundary |
+| render_compass before gamepedia block | Gamepedia overlay Z-order covers compass naturally without explicit guard |
+| No view_mode/gamepedia guards in 07-02 | Phase 8 (WIDG-02, WIDG-03) scope; widget renders every frame for now |
 
 ---
 
@@ -82,8 +83,8 @@ Progress: [█████░░░░░] 50%
 
 ## Session Continuity
 
-**Last activity:** 2026-03-12 -- Completed 07-01-PLAN.md (lib/compass.py created)
-**Next action:** Execute 07-02 (integrate render_compass into main.py)
+**Last activity:** 2026-03-12 -- Completed 07-02-PLAN.md (render_compass wired into main.py)
+**Next action:** v1.2 milestone complete -- plan Phase 8 if continuing
 
 ---
 
