@@ -30,10 +30,16 @@ Navigable, intuitive traversal of S3 -- making 4D geometry feel tangible through
 - existing: Procedural techno ambient music with 2.1M+ configurations
 - existing: Lazy identicon/name generation with LRU eviction
 - existing: Planet sprites (10 types, hash-based per point)
+- v1.2: Corner compass widget with 4D orientation (compass rose, Y tilt bar, W depth gauge)
+- v1.2: Compass rose for X/Z axes with animated Lerp needle
+- v1.2: Vertical tilt bar for Y axis
+- v1.2: W depth gauge with color interpolation
+- v1.2: Compass hidden when Gamepedia overlay is open
+- v1.2: Compass visible only in view mode 0 (Assigned colors)
 
 ### Active
 
-(None yet -- start next milestone to define)
+(None — next milestone not yet defined)
 
 ### Out of Scope
 
@@ -47,8 +53,8 @@ Navigable, intuitive traversal of S3 -- making 4D geometry feel tangible through
 - **Inspiration:** YouTube transcript on high-dimensional geometry (sphere volume formulas, S3 properties, SU(2)/quaternion connections)
 - **Tech stack:** Python + Pygame + NumPy, standard venv
 - **Mathematical foundation:** Unit vectors in R4, 4x4 orthogonal orientation frame, Gram-Schmidt reorthogonalization, slerp interpolation, KDTree spatial index
-- **Current state:** v1.0 shipped -- fully functional explorer with spatial indexing, bookmarks, search, auto-travel, visual effects (glow, starfield, travel line, breadcrumbs), radial menu detail panel, procedural audio
-- **Codebase:** 2,172 LOC Python (main.py, sphere.py, audio.py, test_sphere.py)
+- **Current state:** v1.2 shipped -- compass widget with conditional rendering
+- **Codebase:** ~7,500 LOC Python across main.py, sphere.py, audio.py, lib/*.py, tests/
 
 ## Constraints
 
@@ -69,6 +75,15 @@ Navigable, intuitive traversal of S3 -- making 4D geometry feel tangible through
 | KDTree + angular filter for visibility | Sub-linear 4D spatial prune via Euclidean radius, then strict dot-product FOV cone | Good |
 | Prefix match for search | Fast and predictable with small visible set (~10 points) | Good |
 | Click-hold radial menu for interactions | Non-intrusive, discoverable, extensible context menu | Good |
+| Compass: atan2(-z,x) heading, arccos(abs(y)) tilt, dot(w) depth | Natural mapping: XZ=floor, Y=tilt, W=4th dim; fixed standard basis reference | Good |
+| Compass: 200ms Lerp with shortest-path wraparound | Responsive feel, prevents needle spinning past ±pi boundary | Good |
+| Compass: render before gamepedia block | Z-order means overlay naturally covers widget, no explicit guard yet | Good |
+
+## Shipped Milestones
+
+- **v1.0 Explorer MVP** — KDTree, bookmarks, search, visual effects, radial menu
+- **v1.1 Gameplay Prototype** — Traits, reputation, dialogue, persistence
+- **v1.2 4S Compass** — 4D orientation compass widget with conditional rendering
 
 ---
-*Last updated: 2026-03-05 after v1.0 milestone*
+*Last updated: 2026-03-12 after v1.2 milestone*
