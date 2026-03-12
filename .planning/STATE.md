@@ -5,7 +5,7 @@ milestone_name: 4S Compass
 status: completed
 stopped_at: Completed 08-01-PLAN.md
 last_updated: "2026-03-12T18:01:17.195Z"
-last_activity: 2026-03-12 -- Completed quick task 1: compass two-ring rewrite
+last_activity: 2026-03-12 -- Completed quick task 2: fix Gamepedia compass entry
 progress:
   total_phases: 2
   completed_phases: 2
@@ -85,7 +85,7 @@ Progress: [██████████] 100%
 
 ## Session Continuity
 
-**Last activity:** 2026-03-12 -- Completed quick task 1: compass two-ring rewrite
+**Last activity:** 2026-03-12 -- Completed quick task 2: fix Gamepedia compass entry
 **Next action:** /gsd:new-milestone to define next version
 
 ---
@@ -95,6 +95,7 @@ Progress: [██████████] 100%
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 1 | Change compass to two NS circles pointing to Y and W axis intersections | 2026-03-12 | 9327ce3 | [1-change-compass-to-two-ns-circles-pointin](./quick/1-change-compass-to-two-ns-circles-pointin/) |
+| 2 | Fix Gamepedia Compass entry to describe two-ring widget | 2026-03-12 | ec1b169 | [2-fix-the-gamepedia-compass-entry](./quick/2-fix-the-gamepedia-compass-entry/) |
 
 ---
 
