@@ -5,7 +5,7 @@ SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 800
 
 # Colors
 BG_COLOR = (20, 20, 30)
-POINT_COLOR = (200, 200, 255)
+PLANET_COLOR = (200, 200, 255)
 CAMERA_COLOR = (255, 100, 100)
 SELECTED_COLOR = (255, 255, 100)
 TEXT_COLOR = (200, 200, 200)
@@ -14,8 +14,8 @@ LIST_ITEM_BG = (60, 60, 90)
 LIST_ITEM_HOVER = (80, 80, 120)
 
 # Game
-NUM_POINTS = 30_000
-FOV_ANGLE = 0.116  # radians, tuned for ~10 visible points
+NUM_PLANETS = 30_000
+FOV_ANGLE = 0.116  # radians, tuned for ~10 visible planets
 GAME_SEED = 42
 ARRIVAL_THRESHOLD = 0.0005  # radians (0.5 mrad) — snap to target when this close
 CAMERA_OFFSET = 0.08  # radians — camera orbital distance from player
@@ -28,6 +28,10 @@ TRIANGLE_PERIOD = 6000.0  # milliseconds for one full triangle rotation
 HOLD_THRESHOLD = 200  # ms before radial menu opens
 MENU_RADIUS = 50  # pixel radius of radial menu
 WEDGE_INNER = 15  # inner dead zone radius
+
+# Dialogue
+DIALOGUE_DURATION = 5000  # ms speech bubble display
+DIALOGUE_FADE = 1000      # ms fade-out at end
 
 # Starfield
 NUM_STARS = 200

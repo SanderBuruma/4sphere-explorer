@@ -407,7 +407,7 @@ def generate_sound(name_key: int) -> pygame.mixer.Sound:
 
 
 def get_audio_params(name_key: int) -> dict:
-    """Extract audio parameters for a point without generating the signal.
+    """Extract audio parameters for a planet without generating the signal.
 
     Replays the same RNG sequence as generate_signal() to extract
     timbre, scale, root note, and tempo selections.
@@ -429,19 +429,19 @@ def get_audio_params(name_key: int) -> dict:
 
 
 def update_audio(visible_indices, visible_distances, name_keys):
-    # Build wanted: point_idx -> volume for points within audio range
+    # Build wanted: planet_idx -> volume for planets within audio range
     wanted = {}
     for idx, dist in zip(visible_indices, visible_distances):
         if dist < AUDIO_RANGE:
             wanted[idx] = (1.0 - dist / AUDIO_RANGE) * MASTER_VOLUME
 
-    # Stop and evict points no longer in range
+    # Stop and evict planets no longer in range
     for idx in list(_active_channels):
         if idx not in wanted:
             _active_channels.pop(idx).stop()
             _sound_cache.pop(idx, None)
 
-    # Start or update wanted points (visible_indices is already sorted closest-first)
+    # Start or update wanted planets (visible_indices is already sorted closest-first)
     for idx, vol in wanted.items():
         if idx not in _active_channels:
             if idx not in _sound_cache:

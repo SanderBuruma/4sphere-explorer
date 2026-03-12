@@ -152,15 +152,15 @@ MAX_TEXTURES_PER_FRAME = 6
 MAX_HIRES_CACHE = 100
 
 # Module-level caches
-_equirect_cache = {}     # point_idx -> low-res (EQUIRECT_H_LO, EQUIRECT_W_LO, 3) uint8
-_equirect_cache_hi = {}  # point_idx -> high-res (EQUIRECT_H, EQUIRECT_W, 3) uint8
+_equirect_cache = {}     # planet_idx -> low-res (EQUIRECT_H_LO, EQUIRECT_W_LO, 3) uint8
+_equirect_cache_hi = {}  # planet_idx -> high-res (EQUIRECT_H, EQUIRECT_W, 3) uint8
 _uv_cache = {}           # render_size -> (inside, lat_norm, lon_norm, shade)
 _frame_budget = 0
 
 # Background preload threading
 _preload_lock = threading.Lock()
-_preload_queue = []      # [(point_idx, name_key), ...] — ordered, front = highest priority
-_preload_active = None   # point_idx currently being generated, or None
+_preload_queue = []      # [(planet_idx, name_key), ...] — ordered, front = highest priority
+_preload_active = None   # planet_idx currently being generated, or None
 _preload_event = threading.Event()  # signals worker that queue has items
 _preload_worker = None   # background thread
 
@@ -354,53 +354,53 @@ def render_planet_frame(equirect, render_size, rotation_angle, tint_color=None):
     return surf
 
 
-def get_planet_rotation_angle(point_idx, elapsed_ms):
+def get_planet_rotation_angle(planet_idx, elapsed_ms):
     """Get current rotation angle for a planet.
 
     20s full rotation period with per-planet phase offset.
     """
-    phase = ((point_idx * 137) % 360) * np.pi / 180.0
+    phase = ((planet_idx * 137) % 360) * np.pi / 180.0
     return phase + (elapsed_ms % ROTATION_PERIOD_MS) / ROTATION_PERIOD_MS * 2 * np.pi
 
 
-def get_planet_equirect(point_idx, name_key):
+def get_planet_equirect(planet_idx, name_key):
     """Get low-res equirect texture for main view rendering.
 
     Args:
-        point_idx: Index into the points array (cache key).
+        planet_idx: Index into the planets array (cache key).
         name_key: Name key used as seed for texture generation.
 
     Returns:
         (EQUIRECT_H_LO, EQUIRECT_W_LO, 3) uint8 ndarray, or None if over budget.
     """
     global _frame_budget
-    if point_idx in _equirect_cache:
-        return _equirect_cache[point_idx]
+    if planet_idx in _equirect_cache:
+        return _equirect_cache[planet_idx]
     if _frame_budget <= 0:
         return None
     _frame_budget -= 1
     tex = generate_equirect_texture(int(name_key), EQUIRECT_H_LO, EQUIRECT_W_LO)
-    _equirect_cache[point_idx] = tex
+    _equirect_cache[planet_idx] = tex
     return tex
 
 
-def get_planet_equirect_hires(point_idx, name_key):
+def get_planet_equirect_hires(planet_idx, name_key):
     """Get high-res equirect texture for detail panel, with background preload.
 
     Returns high-res if cached, otherwise starts a background preload and
     falls back to low-res (or None if low-res also unavailable).
 
     Args:
-        point_idx: Index into the points array (cache key).
+        planet_idx: Index into the planets array (cache key).
         name_key: Name key used as seed for texture generation.
 
     Returns:
         (H, W, 3) uint8 ndarray (high-res or low-res fallback), or None.
     """
-    if point_idx in _equirect_cache_hi:
-        return _equirect_cache_hi[point_idx]
-    request_hires_preload(point_idx, name_key)
-    return get_planet_equirect(point_idx, name_key)
+    if planet_idx in _equirect_cache_hi:
+        return _equirect_cache_hi[planet_idx]
+    request_hires_preload(planet_idx, name_key)
+    return get_planet_equirect(planet_idx, name_key)
 
 
 def _preload_worker_loop():
@@ -417,15 +417,15 @@ def _preload_worker_loop():
                     _preload_active = None
                     _preload_event.clear()
                     break
-                point_idx, name_key = _preload_queue.pop(0)
+                planet_idx, name_key = _preload_queue.pop(0)
                 # Enforce cache cap — evict oldest entries if at limit
                 while len(_equirect_cache_hi) >= MAX_HIRES_CACHE:
                     oldest = next(iter(_equirect_cache_hi))
                     del _equirect_cache_hi[oldest]
-                _preload_active = point_idx
+                _preload_active = planet_idx
             tex = generate_equirect_texture(int(name_key), EQUIRECT_H, EQUIRECT_W)
             with _preload_lock:
-                _equirect_cache_hi[point_idx] = tex
+                _equirect_cache_hi[planet_idx] = tex
                 _preload_active = None
 
 
@@ -437,24 +437,24 @@ def _ensure_worker():
         _preload_worker.start()
 
 
-def request_hires_preload(point_idx, name_key):
+def request_hires_preload(planet_idx, name_key):
     """Queue a single high-priority hires texture for background generation."""
-    if point_idx in _equirect_cache_hi:
+    if planet_idx in _equirect_cache_hi:
         return
     _ensure_worker()
     with _preload_lock:
-        if _preload_active == point_idx:
+        if _preload_active == planet_idx:
             return
         # Remove if already queued, then insert at front (high priority)
-        _preload_queue[:] = [(i, k) for i, k in _preload_queue if i != point_idx]
-        _preload_queue.insert(0, (point_idx, name_key))
+        _preload_queue[:] = [(i, k) for i, k in _preload_queue if i != planet_idx]
+        _preload_queue.insert(0, (planet_idx, name_key))
     _preload_event.set()
 
 
 def update_hires_preload_queue(visible_indices, name_keys):
-    """Set the background preload queue to match current visible points.
+    """Set the background preload queue to match current visible planets.
 
-    Call each frame (or when visibility changes). Points already cached or
+    Call each frame (or when visibility changes). Planets already cached or
     actively generating are skipped. High-priority items (from
     request_hires_preload) stay at the front.
     """
@@ -468,7 +468,7 @@ def update_hires_preload_queue(visible_indices, name_keys):
                 priority_idxs.add(idx)
                 priority_items.append((idx, key))
 
-        # Build new queue: priority items first, then visible points not yet cached
+        # Build new queue: priority items first, then visible planets not yet cached
         new_queue = list(priority_items)
         for idx in visible_indices:
             if idx not in _equirect_cache_hi and idx not in priority_idxs and idx != _preload_active:
@@ -484,7 +484,7 @@ def reset_frame_budget():
 
 
 def evict_planet_cache(indices):
-    """Remove cached textures for points that left the view."""
+    """Remove cached textures for planets that left the view."""
     for idx in indices:
         _equirect_cache.pop(idx, None)
         _equirect_cache_hi.pop(idx, None)

@@ -107,7 +107,7 @@ Or simpler: points on S³ as unit vectors in ℝ⁴ where x² + y² + z² + w² 
 | A/D | Rotate left/right (relative to view) |
 | Q/E | Rotate in 4D depth |
 | V | Cycle view mode (Assigned → 4D Position → XYZ Projection → XYZ Fixed-Y) |
-| Ctrl +/- or scroll (modes 2-3) | Zoom XYZ projection |
+| Ctrl +/- or scroll | Zoom in/out |
 | UP/DOWN | Scroll point list |
 | Drag | Rotate camera (relative to view) |
 | Left click (view) | Travel to nearest point |

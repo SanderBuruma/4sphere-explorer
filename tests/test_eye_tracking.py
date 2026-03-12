@@ -1,4 +1,4 @@
-"""Tests for eye wander/tracking system in lib/graphics.py."""
+"""Tests for eye wander/tracking and morph animation in lib/graphics.py."""
 
 import math
 import pytest
@@ -9,6 +9,8 @@ import pygame
 from lib.graphics import (
     _eye_state, _wander_offset, _WANDER_REACH,
     update_eye_tracking, draw_creature_eyes,
+    generate_morph_data, render_morph_frame, _displace_vertices,
+    generate_morph_frames, get_morph_frame, _MORPH_FRAMES,
 )
 
 
@@ -363,3 +365,179 @@ class TestRenderedPupilWander:
             f"Asymmetric pupil displacement: bottom-right={dist_br:.2f}px, "
             f"top-left={dist_tl:.2f}px, diff={abs(dist_br - dist_tl):.2f}px"
         )
+
+
+# --- Morph animation tests ---
+
+class TestMorphDataGeneration:
+    """Tests for generate_morph_data() mesh extraction."""
+
+    def test_morph_data_keys(self):
+        """Morph data contains all required keys."""
+        md = generate_morph_data(42, size=32)
+        required = {'points', 'simplices', 'tri_colors', 'eye_info', 'color',
+                     'accent', 'outline_color', 'seed', 'size',
+                     'displace_phases', 'displace_freqs'}
+        assert required.issubset(md.keys())
+
+    def test_morph_data_deterministic(self):
+        """Same seed produces identical morph data."""
+        md1 = generate_morph_data(12345, size=32)
+        md2 = generate_morph_data(12345, size=32)
+        np.testing.assert_array_equal(md1['points'], md2['points'])
+        np.testing.assert_array_equal(md1['simplices'], md2['simplices'])
+        assert md1['tri_colors'] == md2['tri_colors']
+        assert md1['eye_info'] == md2['eye_info']
+
+    def test_mesh_has_triangles(self):
+        """Mesh should have a reasonable number of triangles."""
+        md = generate_morph_data(42, size=64)
+        assert len(md['simplices']) > 10
+        assert len(md['tri_colors']) == len(md['simplices'])
+
+    def test_points_within_bounds(self):
+        """All mesh points should be within [0, size] bounds."""
+        md = generate_morph_data(99, size=64)
+        assert np.all(md['points'] >= -1)
+        assert np.all(md['points'] <= 65)
+
+    def test_displacement_params_shape(self):
+        """Displacement parameters have one entry per mesh point."""
+        md = generate_morph_data(42, size=32)
+        n = len(md['points'])
+        assert md['displace_phases'].shape == (n,)
+        assert md['displace_freqs'].shape == (n,)
+
+
+class TestVertexDisplacement:
+    """Tests for _displace_vertices() harmonic oscillator system."""
+
+    def test_zero_time_minimal_displacement(self):
+        """At t=0, displacement should be small but non-zero (phases vary)."""
+        md = generate_morph_data(42, size=64)
+        displaced = _displace_vertices(md, 0)
+        diff = np.linalg.norm(displaced - md['points'], axis=1)
+        # Mean displacement at t=0 should be moderate (not all phases are 0)
+        assert diff.mean() < md['size'] * 0.05
+
+    def test_displacement_changes_over_time(self):
+        """Vertices should be at different positions at different times."""
+        md = generate_morph_data(42, size=64)
+        d1 = _displace_vertices(md, 0)
+        d2 = _displace_vertices(md, 2000)
+        assert not np.allclose(d1, d2)
+
+    def test_displacement_bounded(self):
+        """No vertex should move more than ~5% of size from its base position."""
+        md = generate_morph_data(42, size=64)
+        max_disp = 0
+        for t_ms in range(0, 10000, 500):
+            displaced = _displace_vertices(md, t_ms)
+            diff = np.linalg.norm(displaced - md['points'], axis=1)
+            max_disp = max(max_disp, diff.max())
+        # amplitude capped at size * 0.035, with radial+tangential ~1.4x max
+        assert max_disp < md['size'] * 0.06
+
+    def test_center_points_stable(self):
+        """Points near the center should not be displaced."""
+        md = generate_morph_data(42, size=64)
+        cx, cy = 32.0, 32.0
+        dist_from_center = np.sqrt(
+            (md['points'][:, 0] - cx)**2 + (md['points'][:, 1] - cy)**2)
+        near_center = dist_from_center < 1.0
+        if near_center.any():
+            displaced = _displace_vertices(md, 5000)
+            center_diff = np.linalg.norm(
+                displaced[near_center] - md['points'][near_center], axis=1)
+            assert np.allclose(center_diff, 0)
+
+
+class TestMorphFrameRendering:
+    """Tests for render_morph_frame() output."""
+
+    @classmethod
+    def setup_class(cls):
+        pygame.init()
+
+    @classmethod
+    def teardown_class(cls):
+        pygame.quit()
+
+    def test_returns_surface_and_eyes(self):
+        """render_morph_frame returns (Surface, eye_info)."""
+        md = generate_morph_data(42, size=64)
+        surf, eyes = render_morph_frame(md, 1000)
+        assert isinstance(surf, pygame.Surface)
+        assert surf.get_size() == (64, 64)
+        assert isinstance(eyes, list)
+        assert len(eyes) >= 1
+
+    def test_surface_has_content(self):
+        """Rendered surface should have non-transparent pixels."""
+        md = generate_morph_data(42, size=64)
+        surf, _ = render_morph_frame(md, 1000)
+        alpha = pygame.surfarray.array_alpha(surf)
+        assert (alpha > 0).sum() > 100
+
+    def test_frames_differ(self):
+        """Frames at different times should produce different pixel data."""
+        md = generate_morph_data(42, size=64)
+        s1, _ = render_morph_frame(md, 0)
+        s2, _ = render_morph_frame(md, 3000)
+        px1 = pygame.surfarray.array3d(s1)
+        px2 = pygame.surfarray.array3d(s2)
+        assert not np.array_equal(px1, px2)
+
+    def test_multiple_seeds_render(self):
+        """Various seeds should all produce valid morph frames."""
+        for seed in [1, 42, 999, 123456, 7777777]:
+            md = generate_morph_data(seed, size=32)
+            surf, eyes = render_morph_frame(md, 500)
+            alpha = pygame.surfarray.array_alpha(surf)
+            assert (alpha > 0).sum() > 20, f"Seed {seed} produced empty frame"
+
+
+class TestPreRenderedMorphFrames:
+    """Tests for generate_morph_frames / get_morph_frame pre-rendered cycle."""
+
+    @classmethod
+    def setup_class(cls):
+        pygame.init()
+
+    @classmethod
+    def teardown_class(cls):
+        pygame.quit()
+
+    def test_frame_count(self):
+        """Should generate the expected number of frames."""
+        frames, eye_info = generate_morph_frames(42, size=32)
+        assert len(frames) == _MORPH_FRAMES
+
+    def test_all_frames_have_content(self):
+        """Every pre-rendered frame should have visible pixels."""
+        frames, _ = generate_morph_frames(42, size=32)
+        for i, surf in enumerate(frames):
+            alpha = pygame.surfarray.array_alpha(surf)
+            assert (alpha > 0).sum() > 20, f"Frame {i} is empty"
+
+    def test_frames_are_surfaces(self):
+        """All frames should be pygame Surfaces of the right size."""
+        frames, _ = generate_morph_frames(42, size=32)
+        for surf in frames:
+            assert isinstance(surf, pygame.Surface)
+            assert surf.get_size() == (32, 32)
+
+    def test_get_morph_frame_cycles(self):
+        """get_morph_frame should return different frames at different times."""
+        frames, _ = generate_morph_frames(42, size=32)
+        f0 = get_morph_frame(frames, 0)
+        f_mid = get_morph_frame(frames, 4000)
+        # They should be different surface objects (different frames in cycle)
+        assert f0 is not f_mid
+
+    def test_get_morph_frame_wraps(self):
+        """Frame selection should wrap around the cycle."""
+        frames, _ = generate_morph_frames(42, size=32)
+        f0 = get_morph_frame(frames, 0)
+        f_wrap = get_morph_frame(frames, 8000)  # exactly one cycle later
+        assert f0 is f_wrap

@@ -232,11 +232,16 @@ def _rasterize_polygon(verts, size):
     return mask
 
 
-def _triangulate_and_shade(body_mask, rng, color, size):
-    """Apply low-poly faceted shading via Delaunay triangulation."""
+def _triangulate_and_shade(body_mask, rng, color, size, _return_mesh=False):
+    """Apply low-poly faceted shading via Delaunay triangulation.
+
+    If _return_mesh is True, returns (rgba, mesh_data) where mesh_data is
+    (points, simplices, tri_colors) for use in morph animation.
+    """
     rgba = np.zeros((size, size, 4), dtype=np.uint8)
+    _no_mesh = (rgba, (np.zeros((0, 2)), np.zeros((0, 3), dtype=int), [])) if _return_mesh else rgba
     if body_mask.sum() == 0:
-        return rgba
+        return _no_mesh
 
     body_ys, body_xs = np.where(body_mask)
     n_samples = min(len(body_ys), rng.randint(40, 80))
@@ -245,7 +250,7 @@ def _triangulate_and_shade(body_mask, rng, color, size):
         rgba[body_mask, 1] = color[1]
         rgba[body_mask, 2] = color[2]
         rgba[body_mask, 3] = 255
-        return rgba
+        return _no_mesh
 
     indices = rng.choice(len(body_ys), n_samples, replace=False)
     points = np.column_stack([body_xs[indices], body_ys[indices]])
@@ -263,13 +268,14 @@ def _triangulate_and_shade(body_mask, rng, color, size):
         rgba[body_mask, 1] = color[1]
         rgba[body_mask, 2] = color[2]
         rgba[body_mask, 3] = 255
-        return rgba
+        return _no_mesh
 
     light_dir = np.array([rng.uniform(-0.4, 0.1), rng.uniform(-0.6, -0.2), 1.0])
     light_dir /= np.linalg.norm(light_dir)
     YS, XS = np.mgrid[0:size, 0:size]
     cx, cy = size / 2.0, size / 2.0
 
+    tri_colors = []
     for simplex in tri.simplices:
         v0, v1, v2 = points[simplex]
         centroid = (v0 + v1 + v2) / 3.0
@@ -284,6 +290,7 @@ def _triangulate_and_shade(body_mask, rng, color, size):
         diffuse = max(0.15, np.dot(normal, light_dir))
         brightness = np.clip(0.5 + 0.5 * diffuse + rng.uniform(-0.04, 0.04), 0.3, 1.2)
         tri_color = tuple(int(np.clip(c * brightness, 0, 255)) for c in color)
+        tri_colors.append(tri_color)
 
         min_x = max(0, int(min(v0[0], v1[0], v2[0])))
         max_x = min(size - 1, int(max(v0[0], v1[0], v2[0])))
@@ -321,6 +328,8 @@ def _triangulate_and_shade(body_mask, rng, color, size):
         rgba[:, :, c_idx][outline] = dark[c_idx]
     rgba[:, :, 3][outline] = 255
 
+    if _return_mesh:
+        return rgba, (points.copy(), tri.simplices.copy(), tri_colors)
     return rgba
 
 
@@ -500,10 +509,10 @@ def draw_creature_eyes(screen, x, y, size, eye_info, mouse_pos, seed=0):
 
 
 def get_creature(idx, cache, name_key):
-    """Get or generate creature sprite for a point, with lazy caching.
+    """Get or generate creature sprite for a planet, with lazy caching.
 
     Args:
-        idx: Point index (cache key).
+        idx: Planet index (cache key).
         cache: Dict mapping idx -> (pygame.Surface, eye_info).
         name_key: Integer seed for generation.
 
@@ -512,4 +521,223 @@ def get_creature(idx, cache, name_key):
     """
     if idx not in cache:
         cache[idx] = generate_creature(int(name_key), size=32)
+    return cache[idx]
+
+
+# --- Morph animation system ---
+
+# Pre-rendered morph frame settings
+_MORPH_FRAMES = 16        # frames per animation cycle
+_MORPH_CYCLE_MS = 8000.0  # cycle duration in ms (~8 seconds, non-repeating due to incommensurate freqs)
+
+def generate_morph_data(seed, size=64):
+    """Generate mesh data for animated creature morphing.
+
+    Runs the same generation pipeline as generate_creature but captures
+    the Delaunay mesh (points, simplices, per-triangle colors) needed
+    to re-render deformed frames without re-triangulating.
+
+    Args:
+        seed: Integer seed for deterministic generation.
+        size: Output square pixel size (default 64).
+
+    Returns:
+        dict with keys: points, simplices, tri_colors, eye_info, color,
+        accent, outline_color, seed, size, displace_phases, displace_freqs.
+    """
+    rng = np.random.RandomState(seed & 0xFFFFFFFF)
+    color = _color_from_seed(rng)
+    accent = _accent_color(rng, color)
+
+    outline_verts = _generate_body_outline(rng, size)
+    body_mask = _rasterize_polygon(outline_verts, size)
+
+    for app_verts in _generate_appendages(rng, outline_verts, size):
+        clipped = [(np.clip(x, 0, size - 1), np.clip(y, 0, size - 1)) for x, y in app_verts]
+        body_mask |= _rasterize_polygon(clipped, size)
+
+    if body_mask.sum() < size * size * 0.02:
+        ys, xs = np.mgrid[0:size, 0:size]
+        d = ((xs - size / 2) / (size * 0.2))**2 + ((ys - size / 2) / (size * 0.35))**2
+        body_mask = d <= 1.0
+
+    # Get mesh data from triangulation
+    result = _triangulate_and_shade(body_mask, rng, color, size, _return_mesh=True)
+    _rgba, (mesh_points, simplices, tri_colors) = result
+
+    # Advance RNG through markings (to keep eye positions consistent)
+    _apply_markings(_rgba, body_mask, rng, seed, color, accent, size)
+
+    # Eye positions
+    eye_info = _apply_eyes(_rgba, body_mask, rng, size)
+
+    # Pre-compute per-vertex displacement parameters (separate RNG)
+    disp_rng = np.random.RandomState((seed * 7919) & 0xFFFFFFFF)
+    n_pts = len(mesh_points)
+
+    return {
+        'points': mesh_points.astype(np.float64),
+        'simplices': simplices,
+        'tri_colors': tri_colors,
+        'eye_info': eye_info,
+        'color': color,
+        'accent': accent,
+        'outline_color': tuple(max(0, c // 5) for c in color),
+        'seed': seed,
+        'size': size,
+        'displace_phases': disp_rng.uniform(0, 2 * np.pi, n_pts),
+        'displace_freqs': disp_rng.uniform(0.8, 2.0, n_pts),
+    }
+
+
+def _displace_vertices(morph_data, elapsed_ms):
+    """Displace mesh vertices using harmonic oscillators for organic morphing.
+
+    Combines radial breathing, y-axis wave ripple, and tangential wobble
+    with incommensurate frequencies for non-repeating motion.
+    """
+    points = morph_data['points']
+    size = morph_data['size']
+    phases = morph_data['displace_phases']
+    freqs = morph_data['displace_freqs']
+    t = elapsed_ms / 1000.0
+    cx, cy = size / 2.0, size / 2.0
+
+    displaced = points.copy()
+
+    dx = points[:, 0] - cx
+    dy = points[:, 1] - cy
+    dist = np.sqrt(dx * dx + dy * dy)
+    dist_safe = np.maximum(dist, 0.5)
+
+    # Normalized y-position for wave propagation along body
+    y_norm = points[:, 1] / size
+
+    # Amplitude: proportional to distance from center, capped at ~3.5% of size
+    amplitude = np.minimum(size * 0.035, dist * 0.06)
+
+    # Multi-component radial oscillation (incommensurate frequencies)
+    breathing = 0.6 * np.sin(1.2 * t + phases)
+    ripple = 0.3 * np.sin(2.5 * t + y_norm * 4.0 + phases * 0.7)
+    organic = 0.1 * np.sin(3.7 * t + phases * 1.3 + 2.0)
+    radial = amplitude * (breathing + ripple + organic)
+
+    # Tangential wobble (perpendicular to radial direction)
+    tangential = amplitude * 0.4 * np.cos(1.8 * t + phases + 0.5)
+
+    # Unit vectors: radial and tangential
+    nx = dx / dist_safe
+    ny = dy / dist_safe
+    tx = -ny
+    ty = nx
+
+    # Apply displacement only to points away from center
+    mask = dist > 1.0
+    displaced[mask, 0] += nx[mask] * radial[mask] + tx[mask] * tangential[mask]
+    displaced[mask, 1] += ny[mask] * radial[mask] + ty[mask] * tangential[mask]
+
+    return displaced
+
+
+def render_morph_frame(morph_data, elapsed_ms):
+    """Render one morphed creature frame using displaced triangle mesh.
+
+    Uses pygame.draw.polygon for fast C-level triangle rasterization
+    instead of numpy-based scanline fill.
+
+    Args:
+        morph_data: Dict from generate_morph_data().
+        elapsed_ms: Current time in milliseconds.
+
+    Returns:
+        (pygame.Surface with SRCALPHA, eye_info).
+    """
+    size = morph_data['size']
+    points = _displace_vertices(morph_data, elapsed_ms)
+
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+
+    # Render filled triangles via pygame (C-level, fast)
+    for idx, simplex in enumerate(morph_data['simplices']):
+        tri_pts = points[simplex]
+        color = morph_data['tri_colors'][idx]
+        verts = [(round(float(p[0])), round(float(p[1]))) for p in tri_pts]
+        pygame.draw.polygon(surf, (*color, 255), verts)
+
+    # Compute outline from filled pixels
+    alpha = pygame.surfarray.array_alpha(surf)  # copy, no surface lock
+    filled = alpha > 0
+    if filled.any():
+        dil_iter = max(1, size // 50)
+        dilated = binary_dilation(filled, iterations=dil_iter)
+        outline = dilated & ~filled
+        dark = morph_data['outline_color']
+        px3d = pygame.surfarray.pixels3d(surf)
+        px_a = pygame.surfarray.pixels_alpha(surf)
+        px3d[outline] = dark
+        px_a[outline] = 255
+        del px3d, px_a
+
+    # Draw eye sclera
+    for (nx, ny, nr) in morph_data['eye_info']:
+        ecx = round(nx * size)
+        ecy = round(ny * size)
+        er = max(1, round(nr * size))
+        pygame.draw.circle(surf, (255, 255, 255, 255), (ecx, ecy), er)
+
+    return surf, morph_data['eye_info']
+
+
+def generate_morph_frames(seed, size=32):
+    """Pre-render a cycle of morph animation frames for cheap playback.
+
+    Generates _MORPH_FRAMES surfaces by rendering the morphed mesh at
+    evenly spaced time offsets. At render time, pick a frame based on
+    elapsed_ms for near-free animated blitting.
+
+    Args:
+        seed: Integer seed for deterministic generation.
+        size: Output square pixel size (default 32).
+
+    Returns:
+        (frames, eye_info) where frames is a list of pygame.Surfaces
+        and eye_info is the normalized eye position list.
+    """
+    md = generate_morph_data(seed, size)
+    frames = []
+    for i in range(_MORPH_FRAMES):
+        t_ms = i * _MORPH_CYCLE_MS / _MORPH_FRAMES
+        surf, eye_info = render_morph_frame(md, t_ms)
+        frames.append(surf)
+    return frames, eye_info
+
+
+def get_morph_frame(frames, elapsed_ms):
+    """Pick the appropriate pre-rendered morph frame for the current time.
+
+    Args:
+        frames: List of pre-rendered pygame.Surfaces from generate_morph_frames.
+        elapsed_ms: Current time in milliseconds.
+
+    Returns:
+        pygame.Surface for the current animation frame.
+    """
+    t = (elapsed_ms % _MORPH_CYCLE_MS) / _MORPH_CYCLE_MS
+    idx = int(t * len(frames)) % len(frames)
+    return frames[idx]
+
+
+def get_creature_animated(idx, cache, name_key):
+    """Get or generate animated creature frames for a planet, with lazy caching.
+
+    Args:
+        idx: Planet index (cache key).
+        cache: Dict mapping idx -> (frames_list, eye_info).
+        name_key: Integer seed for generation.
+
+    Returns:
+        (frames_list, eye_info) where frames_list has _MORPH_FRAMES surfaces.
+    """
+    if idx not in cache:
+        cache[idx] = generate_morph_frames(int(name_key), size=32)
     return cache[idx]
