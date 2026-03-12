@@ -1,438 +1,426 @@
-# Architecture Patterns: Creature Interactions & Dialogue
+# Architecture: 4D Compass Widget Integration
 
-**Domain:** 4D exploration game NPC interaction system
-**Researched:** 2026-03-11
+**Project:** 4-Sphere Explorer
+**Researched:** 2026-03-12
+**Context:** Adding a corner compass widget to existing Pygame rendering pipeline
 
-## Recommended Architecture
+## Executive Summary
 
-```
-Creature Interaction Pipeline
+The compass widget integrates into the existing Pygame rendering pipeline with minimal coupling. It derives orientation data from a persistent 4×4 orientation frame (row 0 = camera direction, rows 1-3 = tangent basis vectors in ℝ⁴), applies visual transformations to map 4D basis vectors to 2D screen space, and renders to a corner of the screen after the main viewport but before the sidebar.
 
-1. Player clicks creature (via radial menu)
-   ↓
-2. Load reputation data (in-memory cache)
-   ↓
-3. Generate traits (seeded from name_key)
-   ↓
-4. Select dialogue (trait-modulated template)
-   ↓
-5. Display dialogue overlay
-   ↓
-6. Update reputation (increment visit_count, update timestamp)
-   ↓
-7. Sync reputation to JSON (on exit or periodic flush)
-```
+The widget architecture is:
+- **Data source:** 4×4 `orientation` matrix from sphere math
+- **Rendering phase:** Post-viewport, pre-sidebar (approximately line ~1155 in main.py)
+- **Screen real estate:** Fixed top-left or top-right corner (e.g., 80×120 px)
+- **New code:** Single dedicated module `lib/compass.py` (150-250 LOC) with no modifications to core orientation frame or rotation logic
+- **Build strategy:** Implement rendering first (direction arrows), then depth indicator (W axis color), keeping each component testable in isolation
 
-### Component Boundaries
+---
 
-| Component | Responsibility | Communicates With |
-|-----------|---------------|-------------------|
-| `lib/traits.py` | Derive creature personality from seed (name_key). Return trait dict with 4 axes (aggressive/passive, curious/aloof, friendly/hostile, brave/fearful) as 0–100 scores. | (standalone — pure function) |
-| `lib/dialogue.py` | Select dialogue from templates based on trait vector + visit context. Return text. | traits.py (for generating traits if not passed in) |
-| `lib/reputation.py` | Load/save per-creature reputation data (JSON). Update visit counts and reputation scores. Provide API for main loop. | filesystem (JSON), main.py (on game exit) |
-| `main.py` | Game loop, input handling, radial menu interaction trigger. Call dialogue module. Update in-memory reputation. | lib/dialogue.py, lib/reputation.py |
-| `radial menu` (existing) | Existing UI for interaction options. Add "Interact" or "Talk" option that triggers dialogue flow. Display trait scores. | main.py, dialogue module |
+## 1. Data Flow: Orientation Frame → Compass
 
-### Data Flow
+### 1.1 Orientation Frame Structure
 
-```
-User Action: Click creature in radial menu
-  ↓
-main.py detects "Interact" selection
-  ↓
-reputation_data = load_reputation()[creature_id]  # in-memory cache
-traits = generate_traits(name_key)                 # lib/traits.py
-dialogue_text = get_dialogue(traits, visit_count) # lib/dialogue.py
-  ↓
-Display dialogue_text overlay (2-3 seconds)
-Show trait scores in menu
-  ↓
-Update reputation:
-  reputation_data['visit_count'] += 1
-  reputation_data['last_seen'] = time.time()
-  reputation_data['reputation'] = calculate_reputation(visit_count, action)
-  ↓
-Periodically flush in-memory cache to JSON:
-  save_reputation(reputation_data)
-  (on exit, or every N interactions, or on interval)
-```
-
-## Patterns to Follow
-
-### Pattern 1: Trait Generation from Seed Hash
-
-**What:** Derive 4 personality axes from creature name_key using seeded PRNG, producing 0–100 scores per axis.
-
-**When:** On creature interaction (fast, deterministic, no state needed).
-
-**Rationale:** Matches Dwarf Fortress approach (discrete personality facets drive behavior). Four axes cover personality space without explosion (27 combos if bucketed as low/med/high; 10k+ combos at fine granularity).
-
-**Example:**
+**Current state** (main.py, lines 69-74):
 ```python
-# lib/traits.py
-import random
-
-def generate_traits(name_key: int) -> dict:
-    """Generate deterministic personality from name key.
-    
-    Returns dict with 4 axes, each 0–100:
-    - aggressive: 0 = passive, 100 = aggressive
-    - curious: 0 = aloof, 100 = curious
-    - friendly: 0 = hostile, 100 = friendly
-    - brave: 0 = fearful, 100 = brave
-    """
-    rng = random.Random(name_key)
-    return {
-        'aggressive': rng.randint(0, 100),
-        'curious': rng.randint(0, 100),
-        'friendly': rng.randint(0, 100),
-        'brave': rng.randint(0, 100),
-    }
-
-# Usage
-traits = generate_traits(12345)  # Always same for 12345
-# → {'aggressive': 47, 'curious': 82, 'friendly': 23, 'brave': 61}
+orientation = np.eye(4)  # 4x4 orthonormal matrix
+orientation[0] = camera_pos.copy()  # row 0 = current camera direction (unit vector in R4)
+for _i in range(3):
+    orientation[_i + 1] = tangent_basis_vec  # rows 1-3 = orthonormal basis perpendicular to camera
 ```
 
-Benefits:
-- Deterministic (same key → same traits across sessions)
-- Lightweight (4 integers, no complex computation)
-- Scales to 30k creatures trivially
-- Matches existing codebase procedural patterns (creature avatars, planets, audio)
+The frame is:
+- **Row 0:** Camera position on S³ (unit vector in ℝ⁴) — direction player is "looking toward"
+- **Rows 1, 2, 3:** Orthonormal tangent vectors spanning the 3D manifold perpendicular to the camera direction
+- **Invariant:** All rows are unit vectors; rows 1-3 are pairwise orthogonal and orthogonal to row 0
+
+### 1.2 Compass Data Requirements
+
+The compass displays player **orientation** relative to **fixed standard basis axes** (e₁=[1,0,0,0], e₂=[0,1,0,0], e₃=[0,0,1,0], e₄=[0,0,0,1]).
+
+Required data per frame:
+- **Horizontal compass (X/Z axes):** Projections of `orientation[0]` onto X/Z plane
+  - Computation: `x_proj = orientation[0][0]`, `z_proj = orientation[0][2]`
+
+- **Vertical indicator (Y axis):** Projection of `orientation[0]` onto Y
+  - Computation: `y_proj = orientation[0][1]`, range [-1, 1]
+
+- **Depth indicator (W axis):** Projection of `orientation[0]` onto W
+  - Computation: `w_proj = orientation[0][3]`, range [-1, 1]
+
+No modifications needed to orientation frame or rotation logic.
 
 ---
 
-### Pattern 2: Trait Vector → Dialogue Template Mapping
+## 2. Rendering Pipeline Integration
 
-**What:** Bucket trait axes into low/med/high tiers, map to dialogue pools.
+### 2.1 Current Render Sequence (main.py)
 
-**When:** On dialogue generation (trait vector determines which template pool to use).
+Lines 580–1356 render in this order:
+1. Background fill
+2. Starfield parallax
+3. Viewport planets
+4. Travel line
+5. Tooltips/menus
+6. Divider line (~1154)
+7. Sidebar header/search
+8. Sidebar list
+9. Status line
+10. Gamepedia overlay (if open)
 
-**Example:**
+### 2.2 Compass Integration Point
+
+**Insert after line 1153** (between divider and sidebar header):
 ```python
-# lib/dialogue.py
-def _bucket_trait(value: int) -> str:
-    """Map 0–100 trait score to low/med/high."""
-    if value < 33:
-        return 'low'
-    elif value < 67:
-        return 'med'
-    else:
-        return 'high'
-
-def get_dialogue(traits: dict, visit_count: int) -> str:
-    """Select dialogue based on trait vector and visit context."""
-    # Bucket traits
-    aggression = _bucket_trait(traits['aggressive'])
-    friendliness = _bucket_trait(traits['friendly'])
-    
-    # Determine dialogue phase (first visit vs returning)
-    phase = 'greeting' if visit_count == 0 else 'returning'
-    
-    # Select from trait-grouped template pool
-    key = (aggression, friendliness, phase)
-    pool = DIALOGUE_TEMPLATES.get(key, [])
-    
-    # Vary selection by visit number (avoid repetition)
-    rng = random.Random(traits['name_key'] + visit_count * 10000)
-    return rng.choice(pool) if pool else "..."
-
-# Template structure (data, not code)
-DIALOGUE_TEMPLATES = {
-    ('low', 'high', 'greeting'): [
-        "Welcome, friend! So glad to meet you.",
-        "Hello! I hope your travels are going well.",
-    ],
-    ('low', 'high', 'returning'): [
-        "You came back! That makes me so happy.",
-        "I was hoping you'd visit again.",
-    ],
-    ('high', 'low', 'greeting'): [
-        "What do you want?",
-        "State your business.",
-    ],
-    ('high', 'low', 'returning'): [
-        "You again. Don't waste my time.",
-        "What now?",
-    ],
-    # ... more combinations
-}
+if not gamepedia_open:
+    render_compass(screen, orientation, 10, 10)
 ```
 
-Benefits:
-- Scales to 30k creatures without exponential dialogue debt
-- Trait vector is 3D (low/med/high × 4 axes = 81 max, but sparse in practice)
-- Templates are data (easy to edit/iterate without code changes)
-- Visiting same creature twice → different dialogue (varied seed per visit)
+**Reasoning:**
+- Corner widget, viewport-independent
+- Rendered after viewport but before gamepedia modal
+- Won't be covered by sidebar or overlays
+
+### 2.3 Screen Placement
+
+**Recommendation:** Top-left corner (x=10, y=10)
+- Standard compass UI convention
+- Small footprint (70×90 px), minimal obstruction
+- Visible in all view modes
 
 ---
 
-### Pattern 3: Lazy Load + In-Memory Cache for Reputation
+## 3. Compass Component Architecture
 
-**What:** Load reputation JSON at startup, keep in-memory, flush on exit or periodic checkpoint.
+### 3.1 New Module: `lib/compass.py`
 
-**When:** Reputation is infrequently accessed (once per interaction) and is small (<1 MB).
-
-**Example:**
+**Public interface:**
 ```python
-# lib/reputation.py
-import json
-from pathlib import Path
-from typing import Dict
-import time
-
-SAVE_PATH = Path("saves/reputation.json")
-
-# In-memory cache (reference held by main.py)
-_reputation_cache = {}
-
-def load_reputation() -> Dict:
-    """Load reputation from JSON, or return empty dict if missing."""
-    global _reputation_cache
-    if SAVE_PATH.exists():
-        try:
-            with open(SAVE_PATH) as f:
-                _reputation_cache = json.load(f)
-                # Migrate old schemas
-                for cid, rep in _reputation_cache.items():
-                    rep.setdefault('visit_count', 0)
-                    rep.setdefault('reputation', 0)  # -10 to +10 scale
-                    rep.setdefault('last_seen', 0)
-        except Exception as e:
-            print(f"Warning: failed to load reputation: {e}")
-            _reputation_cache = {}
-    return _reputation_cache
-
-def save_reputation() -> None:
-    """Flush in-memory cache to JSON."""
-    try:
-        SAVE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(SAVE_PATH, 'w') as f:
-            json.dump(_reputation_cache, f, indent=2)
-    except Exception as e:
-        print(f"Error: failed to save reputation: {e}")
-
-def get_reputation(creature_id: int) -> dict:
-    """Get or create reputation entry for creature."""
-    if creature_id not in _reputation_cache:
-        _reputation_cache[creature_id] = {
-            'visit_count': 0,
-            'reputation': 0,      # -10 (hostile) to +10 (allied)
-            'last_seen': 0,
-        }
-    return _reputation_cache[creature_id]
-
-def update_reputation(creature_id: int, action: str = 'visit') -> None:
-    """Update reputation on interaction."""
-    rep = get_reputation(creature_id)
-    rep['visit_count'] += 1
-    rep['last_seen'] = time.time()
-    
-    # Apply reputation delta based on action
-    if action == 'friendly':
-        rep['reputation'] = min(10, rep['reputation'] + 1)
-    elif action == 'hostile':
-        rep['reputation'] = max(-10, rep['reputation'] - 1)
-    # 'visit' = neutral (no change)
+def render_compass(screen, orientation, x, y, size=70):
+    """Render 4D compass to screen at (x, y)."""
 ```
 
-**Schema (reputation.json):**
-```json
-{
-  "12345": {
-    "visit_count": 3,
-    "reputation": 1,
-    "last_seen": 1710158400
-  },
-  "67890": {
-    "visit_count": 1,
-    "reputation": -2,
-    "last_seen": 1710150000
-  }
-}
-```
+**Internal components:**
 
-Benefits:
-- Fast access (dict lookup in memory)
-- Safe writes (JSON on exit prevents corruption)
-- Human-readable for debugging
-- Extensible (add fields as needed)
-- Auto-migration (missing fields default gracefully)
+| Component | Purpose |
+|-----------|---------|
+| `_compute_compass_angles()` | Extract X/Z plane angle from orientation[0] |
+| `_compute_y_tilt()` | Extract Y projection |
+| `_compute_w_depth()` | Extract W projection |
+| `_draw_compass_rose()` | Draw cardinal directions + needle |
+| `_draw_y_indicator()` | Draw vertical bar for Y |
+| `_draw_w_indicator()` | Draw color block for W |
 
----
+### 3.2 Compass Calculations
 
-## Anti-Patterns to Avoid
-
-### Anti-Pattern 1: Dialogue Trees
-
-**What:** Branching dialogue with player choices (node graphs, state machines).
-
-**Why bad:**
-- Exponential state explosion with 30k creatures
-- Each path = content to write (small tree with 5 nodes × 3 choices = 15 dialogue variants per creature)
-- Hard to tune (which path leads where? Why?)
-
-**Instead:** Linear dialogue (one response per interaction) with trait modulation.
-
+**X/Z Angle (compass rose):**
 ```python
-# WRONG: dialogue tree
-dialogue_tree = {
-    'start': {
-        'text': "Hello, what do you want?",
-        'choices': [
-            {'text': "Tell me a story", 'next': 'story_node'},
-            {'text': "Leave", 'next': None},
-        ]
-    },
-    'story_node': {
-        'text': "Once upon a time...",
-        'choices': [...]
-    }
-    # Multiply this by 30k creatures...
-}
-
-# RIGHT: single response (trait-modulated)
-dialogue = get_dialogue(traits, visit_count)
-# → "I'm not much of a storyteller, but I can try..."
-# Personality comes from traits, not branching
+x_proj = orientation[0][0]
+z_proj = orientation[0][2]
+angle = np.arctan2(x_proj, z_proj)  # direction in X/Z plane
+magnitude = np.sqrt(x_proj**2 + z_proj**2)  # alignment with plane
 ```
 
----
-
-### Anti-Pattern 2: Trait Decay / Complex Reputation Math
-
-**What:** Reputation scores decay over time, or interact with other systems (faction, compatibility, etc.).
-
-**Why bad:**
-- Adds state management complexity
-- Hard to debug (reputation changing without interaction)
-- Players can't predict creature behavior
-
-**Instead:** Simple counters (visit count, reputation score). No decay.
-
+**Y Tilt:**
 ```python
-# WRONG: complex decay
-def update_reputation(creature_id, time_delta):
-    rep = reputation[creature_id]
-    rep['score'] = rep['score'] * (0.99 ** time_delta)  # Exponential decay
-    # Now reputation changes silently over time
+y_proj = orientation[0][1]  # range [-1, 1]
+```
 
-# RIGHT: simple counter
-def update_reputation(creature_id, action):
-    rep = get_reputation(creature_id)
-    if action == 'friendly':
-        rep['reputation'] += 1
-    # Only changes on interaction
+**W Depth:**
+```python
+w_proj = orientation[0][3]  # range [-1, 1]
+```
+
+### 3.3 Data Flow
+
+```
+orientation[0] (4D unit vector)
+    ↓
++---+---+---+---+
+|x  |y  |z  |w  |
++---+---+---+---+
+ ↓   ↓   ↓   ↓
+ +--+   +--+   +--+
+ |Rose   |Y |  |W |
+ +--+   +--+   +--+
+    ↓        ↓
+ render_compass(screen)
 ```
 
 ---
 
-### Anti-Pattern 3: Pickle for Reputation
+## 4. Visual Design
 
-**What:** Using `pickle` to serialize reputation data.
+### 4.1 Compass Rose (X/Z Plane)
 
-**Why bad:**
-- Not portable (Python-specific)
-- Not human-readable (can't debug with text editor)
-- Security risk if untrusted sources modify saves
+**Display:** 45×45 px circle with:
+- Cardinal ticks (+X right, -X left, +Z up, -Z down)
+- Text labels "X+", "X-", "Z+", "Z-"
+- Direction needle (arrow) showing orientation[0] projection
+- Opacity scales with magnitude (dim if perpendicular to X/Z plane)
 
-**Instead:** JSON (see Pattern 3 above).
+### 4.2 Y Indicator (Vertical Axis)
+
+**Display:** 8×40 px vertical bar (right of compass rose)
+- Color gradient: blue (-1) → white (0) → red (+1)
+- Tick mark at current Y position
+- Label "Y"
+
+### 4.3 W Indicator (Depth)
+
+**Display:** 12×12 px color block + label (below compass)
+- Color gradient: blue (-1) → white (0) → red (+1)
+- Label "W: [value]"
+
+### 4.4 Layout
+
+```
+Top-left (x=10, y=10):
+
++----------- Compass Widget (70×90 px) -----------+
+|                                                |
+|  [Compass Rose]        [Y Bar]                 |
+|  (45×45 px)            (8×40 px)               |
+|  - Cardinal ticks                              |
+|  - Direction needle                            |
+|                                                |
+|  [W: 0.23] (12×12 color block + label)        |
+|                                                |
++------------------------------------------------+
+```
+
+All text: 10-12pt font, color (200, 200, 200)
 
 ---
 
-## Scalability Considerations
+## 5. Component Responsibilities
 
-At 30,000 creatures:
+### 5.1 Compass Module (`lib/compass.py`)
 
-| Concern | Cost | Bottleneck? |
-|---------|------|-------------|
-| Trait generation per creature | ~0.1 ms (seeded PRNG) | No. O(1) per creature, called only on interaction. |
-| Dialogue selection per creature | ~0.1 ms (dict lookup + choice) | No. O(1), no string processing. |
-| Reputation storage per creature | ~100 bytes JSON | No. 30k creatures × 100 bytes = 3 MB (uncompressed). |
-| Reputation I/O on exit | ~100 ms (write 3 MB JSON) | No. One-time cost, acceptable. |
-| In-memory reputation cache | 3–5 MB | No. Trivial. |
-| Dialogue template data | ~50 KB (20–30 unique templates) | No. Static data, not per-creature. |
+**Owns:**
+- Extracting orientation[0] components
+- Computing angle, Y tilt, W depth
+- Drawing all visuals (rose, Y bar, W block)
+- Text rendering for labels
+- Color mapping for gradients
 
-**Conclusion:** No bottlenecks. Interaction latency dominated by UI rendering, not generation.
+**Does NOT own:**
+- Managing orientation frame
+- Updating orientation
+- Reorthogonalization
+- Game state changes
+
+### 5.2 Main Loop (`main.py`)
+
+**Remains responsible for:**
+- Managing `orientation` 4×4 matrix
+- Updating via `rotate_frame()` / `rotate_frame_tangent()`
+- Reorthogonalization via `reorthogonalize_frame()`
+- Calling `render_compass()` each frame
+- Passing read-only orientation to compass
+
+**Files NOT modified:**
+- `sphere.py` — rotation math untouched
+- `audio.py`, `lib/graphics.py`, `lib/planets.py` — no changes
+- Game loop, input, state management — no changes
 
 ---
 
-## Testing Strategy
+## 6. Integration Phases
 
-| Module | Test Focus | Example |
-|--------|-----------|---------|
-| `lib/traits.py` | Determinism | `assert generate_traits(123) == generate_traits(123)` |
-| `lib/traits.py` | Range validation | `assert all(0 <= v <= 100 for v in traits.values())` |
-| `lib/dialogue.py` | Correctness | `assert get_dialogue(friendly_traits, 0) in GREETING_POOL` |
-| `lib/dialogue.py` | Variance | `assert get_dialogue(..., 0) != get_dialogue(..., 1)` (different responses per visit) |
-| `lib/reputation.py` | I/O round-trip | Save → load → verify schema intact |
-| `lib/reputation.py` | Schema migration | Load old schema → verify defaults applied |
-| Integration | Full flow | Click creature → dialogue shown → reputation updated |
+### Phase A: Setup
+
+1. Create `lib/compass.py` (stub)
+2. Add import to `main.py` (line ~23)
+3. Add render call (line ~1153)
+4. Test: gray rectangle visible
+
+### Phase B: Compass Rose
+
+5. Implement `_compute_compass_angles()`
+6. Implement `_draw_compass_rose()`
+7. Integrate into `render_compass()`
+8. Test: rose rotates with WASD
+
+### Phase C: Y/W Indicators
+
+9. Implement `_compute_y_tilt()` and `_compute_w_depth()`
+10. Implement `_draw_y_indicator()` and `_draw_w_indicator()`
+11. Integrate into `render_compass()`
+12. Test: bars respond to Q/E rotation
+
+### Phase D: Polish
+
+13. Adjust colors/sizing
+14. Add unit tests (`test_compass.py`)
+15. Document in Gamepedia
+16. Manual play-test
+
+### Phase E: Optional (v1.3+)
+
+- Click compass to snap to cardinal
+- Keyboard shortcuts (Ctrl+arrow)
+- Customizable position
+- Compass in XYZ view modes
 
 ---
 
-## Integration Points
+## 7. Potential Pitfalls
 
-### With Existing Radial Menu
+### Pitfall 1: Frame Drift
 
-Add "Interact" option to radial menu:
+**What goes wrong:** Compass shows stale orientation after reorthogonalization.
+
+**Why:** Gram-Schmidt (line 296) may adjust frame. Stale cached values show old direction.
+
+**Mitigation:**
+- Read `orientation[0]` fresh each frame, never cache
+- Test with small perturbations (noise) to verify correctness
+
+### Pitfall 2: Axis Confusion
+
+**What goes wrong:** Compass rose points wrong direction (inverted, off by 90°).
+
+**Why:** X/Z conventions (Y down in Pygame) vs math conventions (Y up).
+
+**Mitigation:**
+- Document clearly: "+Z is up, +X is right"
+- Test: Rotate to align with +Z, verify needle points up
+- Use `arctan2(x, -z)` if screen orientation differs
+
+### Pitfall 3: Gamepedia Modal
+
+**What goes wrong:** Compass hidden when Gamepedia open.
+
+**Why:** Modal overlay fills screen.
+
+**Current mitigation:** Compass only renders when `not gamepedia_open`.
+
+### Pitfall 4: Performance
+
+**What goes wrong:** Frame rate drops from compass rendering.
+
+**Why:** Excessive `font.render()` per frame is slow.
+
+**Mitigation:**
+- Cache font surfaces for labels at init
+- Pre-render, don't call font.render() in loop
+- Use geometric primitives (fast)
+
+### Pitfall 5: W Depth Color Semantics
+
+**What goes wrong:** Blue→white→red gradient confused with temperature (blue=cold).
+
+**Why:** W depth isn't temperature, just direction.
+
+**Mitigation:**
+- Add clear "W Depth" label
+- Gamepedia: "Purple = -W, White = W=0, Cyan = +W"
+
+---
+
+## 8. Files Modified
+
+| File | Change |
+|------|--------|
+| `lib/compass.py` | NEW (150-250 LOC) |
+| `main.py` | Add import (~23), add render call (~1153) |
+| `lib/constants.py` | OPTIONAL: compass position constants |
+| `tests/test_compass.py` | NEW: unit tests |
+| `lib/gamepedia.py` | OPTIONAL: UI section entry |
+
+---
+
+## 9. Testing Strategy
+
+### Unit Tests (test_compass.py)
 
 ```python
-# In main.py, radial menu handler
-if selected_option == "Interact":
-    creature_id = hovered_point_idx
-    name_key = _name_keys[creature_id]
-    
-    # Generate traits (fast, deterministic)
-    traits = generate_traits(name_key)
-    
-    # Get reputation
-    rep = get_reputation(creature_id)
-    
-    # Show traits in menu (optional, for flavor)
-    print(f"Traits: Aggressive {traits['aggressive']}, Friendly {traits['friendly']}")
-    
-    # Get dialogue
-    dialogue = get_dialogue(traits, rep['visit_count'])
-    
-    # Display dialogue (2–3 second overlay)
-    show_dialogue_overlay(dialogue, duration=3.0)
-    
-    # Update reputation
-    update_reputation(creature_id, action='visit')
-    
-    # Periodically flush to disk
-    if game_interaction_count % 10 == 0:
-        save_reputation()
+def test_compass_angle_aligned_z():
+    orientation = np.eye(4)
+    orientation[0] = np.array([0, 0, 1, 0])  # +Z
+    angle, mag, x, z = _compute_compass_angles(orientation[0])
+    assert abs(angle - np.pi/2) < 1e-6  # pointing up
+
+def test_compass_angle_aligned_x():
+    orientation = np.eye(4)
+    orientation[0] = np.array([1, 0, 0, 0])  # +X
+    angle, mag, x, z = _compute_compass_angles(orientation[0])
+    assert abs(angle) < 1e-6  # pointing right
+
+def test_y_tilt():
+    orientation = np.eye(4)
+    orientation[0] = np.array([0.7071, 0.7071, 0, 0])
+    y = _compute_y_tilt(orientation[0])
+    assert abs(y - 0.7071) < 1e-3
+
+def test_w_depth():
+    orientation = np.eye(4)
+    orientation[0] = np.array([0, 0, 0.7071, 0.7071])
+    w = _compute_w_depth(orientation[0])
+    assert abs(w - 0.7071) < 1e-3
+
+def test_color_w_negative():
+    color = _w_to_color(-1.0)
+    assert color[2] > color[0]  # B > R (blue)
+
+def test_color_w_zero():
+    color = _w_to_color(0.0)
+    assert all(abs(color[i] - color[j]) < 20 for i in range(3) for j in range(3))
 ```
 
-### With Existing Detail Panel
+### Integration Tests (manual checklist)
 
-Extend detail panel to show creature traits:
-
-```python
-# In detail panel rendering
-traits = generate_traits(name_key)
-rep = get_reputation(creature_id)
-
-panel_lines = [
-    f"Name: {creature_name}",
-    f"",
-    f"Personality:",
-    f"  Aggressive ▓▓░░░░░░░░ {traits['aggressive']}",
-    f"  Curious   ░░░▓▓▓▓▓░░ {traits['curious']}",
-    f"  Friendly  ▓▓▓▓░░░░░░ {traits['friendly']}",
-    f"  Brave     ░░░░░▓▓▓▓░ {traits['brave']}",
-    f"",
-    f"Reputation: {rep['reputation']:+d}",
-    f"Visits: {rep['visit_count']}",
-]
-```
+- [ ] Compass visible at top-left at startup
+- [ ] Rose rotates correctly with WASD
+- [ ] Rose dims when rotating in Y (Q/E perpendicular to X/Z)
+- [ ] Y bar updates correctly
+- [ ] W block changes color blue→white→red
+- [ ] Hidden when Gamepedia open
+- [ ] No FPS regression
+- [ ] No visual glitches
+- [ ] Updates smoothly every frame
 
 ---
 
-## Sources
+## 10. Future Extensions
 
-- [Dwarf Fortress personality traits](https://dwarffortresswiki.org/index.php/DF2014:Personality_trait) — Discrete facets drive emergent behavior
-- [Wildermyth relationships](https://wildermyth.com/wiki/Relationship) — Trait compatibility + reputation progression
-- [Tech Support: Error Unknown dialogue](https://www.gamedeveloper.com/design/developing-a-procedural-dialogue-system-for-tech-support-error-unknown) — Procedural speech modulation by personality
+**v1.3+ possibilities:**
+- Click compass to snap to cardinal direction
+- Keyboard shortcuts (Ctrl+arrow) to align to axes
+- Customizable position (settings)
+- Compass in XYZ view modes (2, 3)
+- Snap-to-cardinal on keyboard press
+- Compass scale/sizing options
+
+**Architecture already supports:**
+- Parameterized position (x, y in function signature)
+- Click bounding box detection (simple addition)
+- View mode conditional rendering
+- Snap logic in rotation handler
+
+---
+
+## Confidence Assessment
+
+| Area | Confidence | Notes |
+|------|------------|-------|
+| Frame integration | HIGH | Stable, well-documented, unchanged |
+| Pipeline placement | HIGH | Clear insertion point identified |
+| Component math | HIGH | Vector projection is straightforward |
+| Visual design | MEDIUM | Sensible but untested; may iterate after impl |
+| Performance | HIGH | Minimal draws, cached surfaces = fast |
+| Testing | HIGH | Unit tests simple, integration tests clear |
+
+---
+
+## Summary
+
+**Approach:**
+1. New `lib/compass.py` module reads `orientation[0]` (4D), renders 2D compass to corner
+2. Single `render_compass()` call in main.py (~line 1153)
+3. No modifications to sphere.py rotation math or orientation frame management
+4. Build in phases: rose → Y indicator → W indicator → polish
+5. Minimal risk: read-only, self-contained, no game state mutation
+
+**Key property:** Compass is entirely decoupled from navigation logic. Pure visualization layer over orientation frame. Future rotation math changes transparent to compass.
