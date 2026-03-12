@@ -198,6 +198,7 @@ gamepedia_open = False
 gamepedia_selected_topic = -1
 gamepedia_scroll = 0
 gamepedia_collapsed_groups = set(g for g, _ in GAMEPEDIA_CONTENT)  # all collapsed by default
+gamepedia_cursor = None  # None | ("group", gname) | ("topic", abs_idx)
 
 def apply_search_filter(search_query):
     """Filter visible_indices by name prefix match.
@@ -326,30 +327,48 @@ while running:
                 if event.key == pygame.K_F1 or event.key == pygame.K_ESCAPE:
                     gamepedia_open = False
                 elif event.key in (pygame.K_UP, pygame.K_DOWN):
-                    _vis = []
+                    # Build unified nav order: groups always present, topics only if group expanded
+                    _nav_order = []
                     _ai = 0
                     for _gn, _tops in GAMEPEDIA_CONTENT:
-                        for _ in _tops:
-                            if _gn not in gamepedia_collapsed_groups:
-                                _vis.append(_ai)
-                            _ai += 1
-                    if _vis:
-                        if event.key == pygame.K_UP:
-                            if gamepedia_selected_topic == -1:
-                                gamepedia_selected_topic = _vis[-1]
-                            elif gamepedia_selected_topic in _vis:
-                                _pos = _vis.index(gamepedia_selected_topic)
-                                gamepedia_selected_topic = _vis[max(0, _pos - 1)]
+                        _nav_order.append(("group", _gn))
+                        if _gn not in gamepedia_collapsed_groups:
+                            for _ in _tops:
+                                _nav_order.append(("topic", _ai))
+                                _ai += 1
                         else:
-                            if gamepedia_selected_topic == -1:
-                                gamepedia_selected_topic = _vis[0]
-                            elif gamepedia_selected_topic in _vis:
-                                _pos = _vis.index(gamepedia_selected_topic)
-                                gamepedia_selected_topic = _vis[min(len(_vis) - 1, _pos + 1)]
-                        gamepedia_scroll = 0
+                            _ai += len(_tops)
+                    if _nav_order:
+                        if gamepedia_cursor is None:
+                            gamepedia_cursor = _nav_order[-1] if event.key == pygame.K_UP else _nav_order[0]
+                        elif gamepedia_cursor in _nav_order:
+                            _pos = _nav_order.index(gamepedia_cursor)
+                            if event.key == pygame.K_UP:
+                                gamepedia_cursor = _nav_order[max(0, _pos - 1)]
+                            else:
+                                gamepedia_cursor = _nav_order[min(len(_nav_order) - 1, _pos + 1)]
+                        if gamepedia_cursor[0] == "topic":
+                            gamepedia_selected_topic = gamepedia_cursor[1]
+                            gamepedia_scroll = 0
+                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                    if gamepedia_cursor is not None:
+                        kind, key = gamepedia_cursor
+                        if kind == "group":
+                            if key in gamepedia_collapsed_groups:
+                                gamepedia_collapsed_groups.discard(key)
+                            else:
+                                gamepedia_collapsed_groups.add(key)
+                        elif kind == "topic":
+                            gamepedia_selected_topic = key
+                            gamepedia_scroll = 0
+                elif event.key == pygame.K_PAGEDOWN:
+                    gamepedia_scroll += 10
+                elif event.key == pygame.K_PAGEUP:
+                    gamepedia_scroll = max(0, gamepedia_scroll - 10)
             elif event.key == pygame.K_F1:
                 gamepedia_open = True
                 gamepedia_selected_topic = -1
+                gamepedia_cursor = None
                 gamepedia_collapsed_groups = set(g for g, _ in GAMEPEDIA_CONTENT)
                 gamepedia_scroll = 0
             elif search_active:
@@ -1325,11 +1344,14 @@ while running:
             collapsed = gname in gamepedia_collapsed_groups
             # Group header with darkened accent bg + bar
             header_bg = (accent[0] // 6 + 10, accent[1] // 6 + 10, accent[2] // 6 + 15)
-            pygame.draw.rect(screen, header_bg, (left_x - 4, y_cursor, left_w, line_h))
+            header_rect = pygame.Rect(left_x - 4, y_cursor, left_w, line_h)
+            pygame.draw.rect(screen, header_bg, header_rect)
             pygame.draw.line(screen, accent, (left_x - 4, y_cursor), (left_x - 4, y_cursor + line_h - 1), 3)
             indicator = "\u25b6" if collapsed else "\u25bc"
             header_surf = font.render(f"{indicator} {gname.upper()}", True, accent)
             screen.blit(header_surf, (left_x + 4, y_cursor + 5))
+            if gamepedia_cursor == ("group", gname):
+                pygame.draw.rect(screen, (220, 220, 255), header_rect, 1)
             y_cursor += line_h
             if collapsed:
                 abs_flat_idx += len(topics)
@@ -1346,6 +1368,9 @@ while running:
                         color = (180, 180, 200)
                     topic_surf = font.render(f"  {title}", True, color)
                     screen.blit(topic_surf, (left_x, y_cursor + 4))
+                    if gamepedia_cursor == ("topic", abs_flat_idx):
+                        cur_rect = pygame.Rect(left_x - 4, y_cursor, left_w, line_h)
+                        pygame.draw.rect(screen, (220, 220, 255), cur_rect, 1)
                     y_cursor += line_h
                     abs_flat_idx += 1
 
@@ -1361,11 +1386,11 @@ while running:
                 "",
                 "HOW TO NAVIGATE",
                 "",
-                "  Click a category header on the left to expand it.",
-                "  Click a topic to read it in this panel.",
-                "  Use UP / DOWN to move between visible topics.",
-                "  Scroll the mouse wheel to scroll long articles.",
-                "  Press F1 or ESC to close.",
+                "  UP / DOWN    Move the cursor through headers and topics.",
+                "  Enter/Space  Expand/collapse a header; select a topic.",
+                "  PgUp / PgDn  Scroll the right panel content.",
+                "  Click        Click a header to expand it; click a topic to read it.",
+                "  F1 / ESC     Close Gamepedia.",
                 "",
                 "CATEGORIES",
                 "",
@@ -1435,7 +1460,7 @@ while running:
                 screen.blit(ind_surf, (right_x + right_w - ind_surf.get_width(), SCREEN_HEIGHT - 24))
 
         # Help hint
-        hint = font.render("F1/ESC: Close | Click header: Expand/Collapse | UP/DOWN: Topics | Scroll: Content", True, (100, 100, 120))
+        hint = font.render("F1/ESC: Close  UP/DOWN: Navigate  Enter/Space: Select/Toggle  PgUp/Dn: Scroll", True, (100, 100, 120))
         screen.blit(hint, (SCREEN_WIDTH // 2 - hint.get_width() // 2, SCREEN_HEIGHT - 24))
 
     pygame.display.flip()
