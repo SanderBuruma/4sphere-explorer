@@ -183,7 +183,7 @@ list_scroll = 0
 visible_indices = []
 visible_distances = []
 hovered_item = None
-view_mode = 0  # 0 = assigned colors, 1 = relative 4D position colors, 2 = XYZ projection (W→color), 3 = XYZ Fixed-Y
+view_mode = 3  # 0 = assigned colors, 1 = relative 4D position colors, 2 = XYZ projection (W→color), 3 = XYZ Fixed-Y
 view_zoom = 1.0  # zoom level for all view modes
 XYZ_FIXED_UP = np.array([0.0, 1.0, 0.0, 0.0])  # absolute Y axis for mode 3
 last_projected_planets = []  # store for click detection
@@ -246,7 +246,7 @@ if _save_data:
     reputation_store = _save_data["reputation_store"]
     visited_planets = _save_data["visited_planets"]
     visit_history = _save_data["visit_history"]
-    view_mode = _save_data.get("view_mode", 0)
+    view_mode = _save_data.get("view_mode", 3)
     view_zoom = _save_data.get("view_zoom", 1.0)
     camera_pos = orientation[0]
 
@@ -707,17 +707,42 @@ while running:
             if not (0 <= sx < view_width and 0 <= sy < SCREEN_HEIGHT):
                 continue
 
-            # W→color: -1 to +1 maps blue→white→red
-            r, g, b = w_to_color(max(-1.0, min(1.0, w_vals[vi] / FOV_ANGLE)))
+            # W-halo color from 4th coordinate
+            w_color = w_to_color(max(-1.0, min(1.0, w_vals[vi] / FOV_ANGLE)))
 
-            # Size by angular proximity
+            # Planet body uses its assigned color
+            base_color = planet_colors[idx]
+
+            # Distance-based sizing (same as modes 0/1)
             angular_dist = visible_distances[vi]
             normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / FOV_ANGLE)))
-            radius = max(1, int(2 + normalized_dist * 4))
+            radius = max(2, int((2 + normalized_dist * 5) * view_zoom))
 
-            color = (min(255, r), min(255, g), min(255, b))
-            planet_display_colors[idx] = color
-            pygame.draw.circle(screen, color, (sx, sy), radius)
+            planet_display_colors[idx] = base_color
+
+            # W-colored glow halo behind the planet
+            glow_radius = int(radius * 2.5 + normalized_dist * 8)
+            glow_surf = pygame.Surface((glow_radius * 2 + 4, glow_radius * 2 + 4), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (*w_color, 60), (glow_radius + 2, glow_radius + 2), glow_radius)
+            screen.blit(glow_surf, (sx - glow_radius - 2, sy - glow_radius - 2))
+
+            # Render rotating planet sprite; fall back to circle if not yet cached
+            equirect = get_planet_equirect(idx, _name_keys[idx])
+            if equirect is not None:
+                rot = get_planet_rotation_angle(idx, elapsed_ms)
+                sz = max(4, int(2 * radius))
+                surf = render_planet_frame(equirect, sz, rot, tint_color=base_color)
+                screen.blit(surf, (sx - sz // 2, sy - sz // 2))
+            else:
+                pygame.draw.circle(screen, base_color, (sx, sy), radius)
+
+            # Inspection ring on currently inspected planet
+            if idx == inspected_planet_idx:
+                ring_radius = radius + 10
+                ring_surf = pygame.Surface((ring_radius * 2 + 4, ring_radius * 2 + 4), pygame.SRCALPHA)
+                ring_color = (*base_color, 160)
+                pygame.draw.circle(ring_surf, ring_color, (ring_radius + 2, ring_radius + 2), ring_radius, 2)
+                screen.blit(ring_surf, (sx - ring_radius - 2, sy - ring_radius - 2))
 
             p2d = np.array([float(sx), float(sy)])
             projected_planets.append((p2d, angular_dist, 0.0, idx))
@@ -731,6 +756,22 @@ while running:
                 hover_planet = (p2d, angular_dist, idx)
 
         last_projected_planets = projected_planets
+
+        # Draw breadcrumb trail for XYZ modes
+        if visit_history:
+            trail_len = len(visit_history)
+            for trail_i, trail_idx in enumerate(visit_history):
+                trail_p4d = planets[trail_idx]
+                trail_rel = trail_p4d @ player_frame.T
+                trail_sx = int(center_x + trail_rel[1] * xyz_scale)
+                trail_sy = int(center_y + trail_rel[2] * xyz_scale)
+                if 0 <= trail_sx < view_width and 0 <= trail_sy < SCREEN_HEIGHT:
+                    fade = (trail_i + 1) / trail_len
+                    alpha = int(30 + fade * 100)
+                    dot_radius = 3 if fade > 0.5 else 2
+                    dot_surf = pygame.Surface((dot_radius * 2 + 4, dot_radius * 2 + 4), pygame.SRCALPHA)
+                    pygame.draw.circle(dot_surf, (180, 220, 255, alpha), (dot_radius + 2, dot_radius + 2), dot_radius)
+                    screen.blit(dot_surf, (trail_sx - dot_radius - 2, trail_sy - dot_radius - 2))
 
     else:
         # Standard tangent space projection (modes 0 and 1)
