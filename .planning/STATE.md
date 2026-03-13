@@ -5,7 +5,7 @@ milestone_name: 4S Compass
 status: completed
 stopped_at: Completed 08-01-PLAN.md
 last_updated: "2026-03-12T18:43:00.000Z"
-last_activity: 2026-03-13 -- Fix: uniform Q/E rotation in mode 3 via angle-based build_fixed_y_frame
+last_activity: 2026-03-13 -- Stripped view modes 0/1/2; single XYZ Fixed-Y view
 progress:
   total_phases: 2
   completed_phases: 2
@@ -49,9 +49,7 @@ Progress: [██████████] 100%
 - v1.2 shipped with 2 phases, 3 plans (phases 7-8): compass widget, conditional rendering
 - Codebase: ~7,500 LOC Python
 - Orientation frame: 4x4 orthogonal matrix (row 0 = camera, rows 1-3 = tangent basis)
-- 4 view modes: Assigned, 4D Position, XYZ Projection, XYZ Fixed-Y
-- Compass is for default view (mode 0) only
-- New module: lib/compass.py with render_compass(screen, orientation, x, y, size) interface
+- Single view mode: XYZ Fixed-Y with W-colored halos
 
 ---
 
@@ -85,7 +83,7 @@ Progress: [██████████] 100%
 
 ## Session Continuity
 
-**Last activity:** 2026-03-13 -- Fix: uniform Q/E rotation in mode 3 via angle-based build_fixed_y_frame
+**Last activity:** 2026-03-13 -- Stripped view modes 0/1/2; single XYZ Fixed-Y view
 **Next action:** /gsd:new-milestone to define next version
 
 ---

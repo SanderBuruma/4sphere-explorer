@@ -92,7 +92,7 @@ def get_name(idx):
     return planet_name_cache[idx]
 
 planet_colors = random_color(NUM_PLANETS)
-view_mode = 0
+view_mode = 3  # only XYZ Fixed-Y
 view_zoom = 1.0
 
 # Travel state
@@ -156,11 +156,8 @@ def render_frame():
     # Build planet display colors dict for sidebar
     planet_display_colors = {}
 
-    if view_mode in (2, 3):
-        if view_mode == 3:
-            player_frame = build_fixed_y_frame(player_pos, 0.0)
-        else:
-            player_frame = build_player_frame(player_pos, orientation)
+    if True:
+        player_frame = build_fixed_y_frame(player_pos, 0.0)
 
         vis_pts = planets[visible_indices]
         rel_vis = vis_pts @ player_frame.T
@@ -201,18 +198,7 @@ def render_frame():
             normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / FOV_ANGLE)))
             radius = max(1, int(2 + normalized_dist * 6))
 
-            if view_mode == 0:
-                color = tuple(int(c) for c in planet_colors[idx])
-            else:
-                rel = p4d - player_pos
-                n = np.linalg.norm(rel)
-                if n > 1e-10:
-                    rel /= n
-                r = int(np.clip((rel[0] + 1) * 127, 0, 255))
-                g = int(np.clip((rel[1] + 1) * 127, 0, 255))
-                b = int(np.clip((rel[2] + 1) * 127, 0, 255))
-                brightness = (rel[3] + 1) / 2
-                color = (int(r * brightness), int(g * brightness), int(b * brightness))
+            color = tuple(int(c) for c in planet_colors[idx])
 
             planet_display_colors[idx] = color
 
@@ -249,7 +235,7 @@ def render_frame():
     pygame.draw.rect(screen, LIST_BG, (sidebar_x, 0, 300, SCREEN_HEIGHT))
 
     # View mode label
-    mode_label = ["Assigned", "4D Position", "XYZ Projection", "XYZ Fixed-Y"][view_mode]
+    mode_label = "XYZ Fixed-Y"
     mode_text = font.render(f"View: {mode_label}", True, TEXT_COLOR)
     screen.blit(mode_text, (sidebar_x + 10, 10))
 
@@ -369,14 +355,10 @@ def script_default():
 
 
 def script_viewmodes():
-    """Screenshot all 4 view modes."""
-    global view_mode
+    """Screenshot the view."""
     update_visible()
-    names = ["assigned", "4d_position", "xyz_projection", "xyz_fixed_y"]
-    for i, name in enumerate(names):
-        view_mode = i
-        render_frame()
-        save_screenshot(f"view_{i}_{name}")
+    render_frame()
+    save_screenshot("view_xyz_fixed_y")
 
 
 def script_travel():
@@ -400,8 +382,6 @@ def script_travel():
 
 def script_fixed_y_rotation_test():
     """Verify Fixed-Y colors don't change when rotating. Takes before/after screenshots."""
-    global view_mode
-    view_mode = 3
     update_visible()
     render_frame()
     save_screenshot("fixedy_01_initial")

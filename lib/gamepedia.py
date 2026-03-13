@@ -11,7 +11,7 @@ GAMEPEDIA_CONTENT = [
         ("Keyboard", """\
 WASD  Rotate your view up/down/left/right
 Q/E   Rotate along the 4th axis (the "depth" you can't normally see)
-V     Switch coloring mode (4 modes — see View Modes)
+V     (reserved)
 Tab   Jump to the closest unvisited planet
 / F   Open the name search bar
 F1    Open/close this screen
@@ -29,27 +29,13 @@ Click a name in the sidebar to fly to that planet.
 Drag anywhere in the viewport to rotate your view freely.
 
 Mouse wheel zooms in any view mode."""),
-        ("View Modes", """\
-Press V to cycle through four view modes. The game starts in XYZ \
-Fixed-Y mode by default.
-
-XYZ Fixed-Y (default): Planets are plotted by their 3D position \
-with the vertical axis locked to an absolute "up" direction. Each \
-planet keeps its own assigned color, and a glowing halo around it \
-shows the hidden 4th coordinate (W): blue for negative W, white \
-near zero, red for positive W. Use Q/E to rotate your view into \
-the 4th dimension. Scroll to zoom.
-
-XYZ Projection: Same spatial layout as Fixed-Y, but the axes rotate \
-freely with your camera. Planets keep their assigned colors with \
-W-colored halos, just like Fixed-Y mode.
-
-Assigned: Every planet keeps one random color forever, rendered as \
-rotating sprites with glow halos. Good for recognizing individual \
-planets at a glance. The compass widget is only visible in this mode.
-
-4D Position: Color is computed from the direction to each planet in \
-4D space. Nearby planets look similar; far-away planets look different."""),
+        ("View", """\
+Planets are plotted by their 3D position with the vertical axis \
+locked to an absolute "up" direction. Each planet keeps its own \
+assigned color, and a glowing halo around it shows the hidden 4th \
+coordinate (W): blue for negative W, white near zero, red for \
+positive W. Use Q/E to rotate your view into the 4th dimension. \
+Scroll to zoom."""),
     ]),
     ("Navigation", [
         ("Travel & Slerp", """\

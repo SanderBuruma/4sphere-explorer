@@ -18,7 +18,6 @@ from lib.gamepedia import (
     GP_LEFT_X, GP_LEFT_W, GP_TOP_Y, GP_LINE_H,
     GAMEPEDIA_CONTENT, _gamepedia_flat, word_wrap_text,
 )
-from lib.compass import render_compass
 from lib.reputation import get_reputation, get_tier, record_visit, record_talk
 from lib.persistence import save_game, load_game
 from lib.traits import generate_traits
@@ -33,10 +32,7 @@ from sphere import (
     rotate_frame,
     rotate_frame_tangent,
     reorthogonalize_frame,
-    build_player_frame,
     build_fixed_y_frame,
-    project_to_tangent,
-    project_tangent_to_screen,
     slerp,
     w_to_color,
     random_color,
@@ -179,9 +175,7 @@ list_scroll = 0
 visible_indices = []
 visible_distances = []
 hovered_item = None
-view_mode = 3  # 0 = assigned colors, 1 = relative 4D position colors, 2 = XYZ projection (W→color), 3 = XYZ Fixed-Y
 view_zoom = 1.0  # zoom level for all view modes
-XYZ_FIXED_UP = np.array([0.0, 1.0, 0.0, 0.0])  # absolute Y axis for mode 3
 xyz_w_angle = 0.0  # Q/E rotation angle for mode 3 (tangent-subspace, uniform)
 last_projected_planets = []  # store for click detection
 list_start_y = 100  # Y coordinate where planet list items begin (updated each frame)
@@ -243,7 +237,6 @@ if _save_data:
     reputation_store = _save_data["reputation_store"]
     visited_planets = _save_data["visited_planets"]
     visit_history = _save_data["visit_history"]
-    view_mode = _save_data.get("view_mode", 3)
     view_zoom = _save_data.get("view_zoom", 1.0)
     xyz_w_angle = _save_data.get("xyz_w_angle", 0.0)
     camera_pos = orientation[0]
@@ -262,36 +255,21 @@ while running:
     if not gamepedia_open:
         # Camera rotation via persistent orientation frame
         rotation_speed = ROTATION_SPEED
-        if view_mode in (2, 3):
-            # XYZ modes: 4D-Golf-style rotation — W axis stays fixed for stable halo coloring
-            # A/D = yaw (horizontal pan), W/S = pitch (vertical tilt), Q/E = 4D depth rotation
-            # View frame is rebuilt from fixed absolute axes each frame, so only camera movement matters
-            if keys[pygame.K_a]:
-                rotate_frame(orientation, 1, -rotation_speed)
-            if keys[pygame.K_d]:
-                rotate_frame(orientation, 1, rotation_speed)
-            if keys[pygame.K_w]:
-                rotate_frame(orientation, 2, -rotation_speed)
-            if keys[pygame.K_s]:
-                rotate_frame(orientation, 2, rotation_speed)
-            # Q/E: direct tangent-space angle (uniform speed, no camera movement)
-            if keys[pygame.K_q]:
-                xyz_w_angle += rotation_speed
-            if keys[pygame.K_e]:
-                xyz_w_angle -= rotation_speed
-        else:
-            if keys[pygame.K_w]:  # rotate up (screen Y)
-                rotate_frame(orientation, 2, -rotation_speed)
-            if keys[pygame.K_s]:  # rotate down
-                rotate_frame(orientation, 2, rotation_speed)
-            if keys[pygame.K_a]:  # rotate left (screen X)
-                rotate_frame(orientation, 1, -rotation_speed)
-            if keys[pygame.K_d]:  # rotate right
-                rotate_frame(orientation, 1, rotation_speed)
-            if keys[pygame.K_q]:  # rotate in 4D depth
-                rotate_frame(orientation, 3, rotation_speed)
-            if keys[pygame.K_e]:  # rotate in 4D depth (opposite)
-                rotate_frame(orientation, 3, -rotation_speed)
+        # A/D = yaw (horizontal pan), W/S = pitch (vertical tilt), Q/E = 4D depth rotation
+        # View frame is rebuilt from fixed absolute axes each frame, so only camera movement matters
+        if keys[pygame.K_a]:
+            rotate_frame(orientation, 1, -rotation_speed)
+        if keys[pygame.K_d]:
+            rotate_frame(orientation, 1, rotation_speed)
+        if keys[pygame.K_w]:
+            rotate_frame(orientation, 2, -rotation_speed)
+        if keys[pygame.K_s]:
+            rotate_frame(orientation, 2, rotation_speed)
+        # Q/E: direct tangent-space angle (uniform speed, no camera movement)
+        if keys[pygame.K_q]:
+            xyz_w_angle += rotation_speed
+        if keys[pygame.K_e]:
+            xyz_w_angle -= rotation_speed
 
     reorthogonalize_frame(orientation)
     camera_pos = orientation[0]
@@ -315,7 +293,7 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             save_game(player_pos, orientation, reputation_store, visited_planets,
-                      visit_history, view_mode, view_zoom, xyz_w_angle)
+                      visit_history, view_zoom=view_zoom, xyz_w_angle=xyz_w_angle)
             running = False
         elif event.type == pygame.KEYDOWN:
             if gamepedia_open:
@@ -383,9 +361,6 @@ while running:
                         menu_state = "idle"
                         menu_planet_idx = None
                         menu_center = None
-                elif event.key == pygame.K_v:
-                    view_mode = (view_mode + 1) % 4  # cycle 0/1/2/3
-                    xyz_w_angle = 0.0
                 elif event.key == pygame.K_SLASH or event.key == pygame.K_f:
                     search_active = True
                     search_text = ""
@@ -646,195 +621,94 @@ while running:
     # Store computed display colors per planet for reuse in tooltip/panel/sidebar
     planet_display_colors = {}
 
-    if view_mode in (2, 3):
-        # XYZ Projection view: visible planets rendered by XYZ position relative to player, W→color
-        # Build proper orthonormal frame centered on player (not camera)
-        # Build view frame from orientation, with Fixed-Y override for mode 3
-        # W-coloring uses absolute coordinates (rotation-invariant)
-        if view_mode == 3:
-            player_frame = build_fixed_y_frame(player_pos, xyz_w_angle)
+    # XYZ Fixed-Y view: planets rendered by XYZ position relative to player, W→halo color
+    # W-coloring uses absolute coordinates (rotation-invariant)
+    player_frame = build_fixed_y_frame(player_pos, xyz_w_angle)
+
+    vis_planets = planets[visible_indices]  # (M, 4)
+    rel_vis = vis_planets @ player_frame.T  # columns: [along_player, basis1, basis2, basis3]
+
+    # Screen mapping: basis1→X, basis2→Y, basis3(W-like)→color
+    xyz_scale = min(view_width, SCREEN_HEIGHT) * 0.4 * view_zoom
+    screen_x = (center_x + rel_vis[:, 1] * xyz_scale).astype(int)
+    screen_y = (center_y + rel_vis[:, 2] * xyz_scale).astype(int)
+    w_vals = rel_vis[:, 3]  # the 4th dimension relative to player
+
+    # Sort by distance from player (farthest first for painter's algorithm)
+    sort_order = np.argsort(rel_vis[:, 0])  # ascending = farthest first
+
+    projected_planets = []
+    for vi in sort_order:
+        idx = visible_indices[vi]
+        sx, sy = screen_x[vi], screen_y[vi]
+        if not (0 <= sx < view_width and 0 <= sy < SCREEN_HEIGHT):
+            continue
+
+        # W-halo color from absolute W coordinate (rotation-invariant)
+        w_color = w_to_color(planets[idx][3])
+
+        # Planet body uses its assigned color
+        base_color = planet_colors[idx]
+
+        # Distance-based sizing
+        angular_dist = visible_distances[vi]
+        normalized_dist = max(0.05, min(1.0, 1.0 - (angular_dist / FOV_ANGLE)))
+        radius = max(2, int((1 + normalized_dist * 2) * view_zoom))
+
+        planet_display_colors[idx] = base_color
+
+        # W-colored glow halo behind the planet
+        glow_radius = max(3, int(radius * 1.8 + normalized_dist * 4))
+        glow_surf = pygame.Surface((glow_radius * 2 + 4, glow_radius * 2 + 4), pygame.SRCALPHA)
+        pygame.draw.circle(glow_surf, (*w_color, 70), (glow_radius + 2, glow_radius + 2), glow_radius)
+        screen.blit(glow_surf, (sx - glow_radius - 2, sy - glow_radius - 2))
+
+        # Render rotating planet sprite; fall back to circle if not yet cached
+        equirect = get_planet_equirect(idx, _name_keys[idx])
+        if equirect is not None:
+            rot = get_planet_rotation_angle(idx, elapsed_ms)
+            sz = max(4, int(2 * radius))
+            surf = render_planet_frame(equirect, sz, rot, tint_color=base_color)
+            screen.blit(surf, (sx - sz // 2, sy - sz // 2))
         else:
-            player_frame = build_player_frame(player_pos, orientation)
+            pygame.draw.circle(screen, base_color, (sx, sy), radius)
 
-        vis_planets = planets[visible_indices]  # (M, 4)
-        rel_vis = vis_planets @ player_frame.T  # columns: [along_player, basis1, basis2, basis3]
+        # Inspection ring on currently inspected planet
+        if idx == inspected_planet_idx:
+            ring_radius = radius + 4
+            ring_surf = pygame.Surface((ring_radius * 2 + 4, ring_radius * 2 + 4), pygame.SRCALPHA)
+            ring_color = (*base_color, 160)
+            pygame.draw.circle(ring_surf, ring_color, (ring_radius + 2, ring_radius + 2), ring_radius, 2)
+            screen.blit(ring_surf, (sx - ring_radius - 2, sy - ring_radius - 2))
 
-        # Screen mapping: basis1→X, basis2→Y, basis3(W-like)→color
-        xyz_scale = min(view_width, SCREEN_HEIGHT) * 0.4 * view_zoom
-        screen_x = (center_x + rel_vis[:, 1] * xyz_scale).astype(int)
-        screen_y = (center_y + rel_vis[:, 2] * xyz_scale).astype(int)
-        w_vals = rel_vis[:, 3]  # the 4th dimension relative to player
+        p2d = np.array([float(sx), float(sy)])
+        projected_planets.append((p2d, angular_dist, 0.0, idx))
 
-        # Sort by distance from player (farthest first for painter's algorithm)
-        sort_order = np.argsort(rel_vis[:, 0])  # ascending = farthest first
+        # Hover detection
+        dx, dy = mx - sx, my - sy
+        dist_sq = dx * dx + dy * dy
+        hit_radius = max(radius + 6, 10)
+        if dist_sq < hit_radius * hit_radius and dist_sq < hover_dist_sq_min:
+            hover_dist_sq_min = dist_sq
+            hover_planet = (p2d, angular_dist, idx)
 
-        projected_planets = []
-        for vi in sort_order:
-            idx = visible_indices[vi]
-            sx, sy = screen_x[vi], screen_y[vi]
-            if not (0 <= sx < view_width and 0 <= sy < SCREEN_HEIGHT):
-                continue
+    last_projected_planets = projected_planets
 
-            # W-halo color from absolute W coordinate (rotation-invariant)
-            w_color = w_to_color(planets[idx][3])
-
-            # Planet body uses its assigned color
-            base_color = planet_colors[idx]
-
-            # Distance-based sizing (~3x smaller than modes 0/1 to avoid overlap)
-            angular_dist = visible_distances[vi]
-            normalized_dist = max(0.05, min(1.0, 1.0 - (angular_dist / FOV_ANGLE)))
-            radius = max(2, int((1 + normalized_dist * 2) * view_zoom))
-
-            planet_display_colors[idx] = base_color
-
-            # W-colored glow halo behind the planet
-            glow_radius = max(3, int(radius * 1.8 + normalized_dist * 4))
-            glow_surf = pygame.Surface((glow_radius * 2 + 4, glow_radius * 2 + 4), pygame.SRCALPHA)
-            pygame.draw.circle(glow_surf, (*w_color, 70), (glow_radius + 2, glow_radius + 2), glow_radius)
-            screen.blit(glow_surf, (sx - glow_radius - 2, sy - glow_radius - 2))
-
-            # Render rotating planet sprite; fall back to circle if not yet cached
-            equirect = get_planet_equirect(idx, _name_keys[idx])
-            if equirect is not None:
-                rot = get_planet_rotation_angle(idx, elapsed_ms)
-                sz = max(4, int(2 * radius))
-                surf = render_planet_frame(equirect, sz, rot, tint_color=base_color)
-                screen.blit(surf, (sx - sz // 2, sy - sz // 2))
-            else:
-                pygame.draw.circle(screen, base_color, (sx, sy), radius)
-
-            # Inspection ring on currently inspected planet
-            if idx == inspected_planet_idx:
-                ring_radius = radius + 4
-                ring_surf = pygame.Surface((ring_radius * 2 + 4, ring_radius * 2 + 4), pygame.SRCALPHA)
-                ring_color = (*base_color, 160)
-                pygame.draw.circle(ring_surf, ring_color, (ring_radius + 2, ring_radius + 2), ring_radius, 2)
-                screen.blit(ring_surf, (sx - ring_radius - 2, sy - ring_radius - 2))
-
-            p2d = np.array([float(sx), float(sy)])
-            projected_planets.append((p2d, angular_dist, 0.0, idx))
-
-            # Hover detection
-            dx, dy = mx - sx, my - sy
-            dist_sq = dx * dx + dy * dy
-            hit_radius = max(radius + 6, 10)
-            if dist_sq < hit_radius * hit_radius and dist_sq < hover_dist_sq_min:
-                hover_dist_sq_min = dist_sq
-                hover_planet = (p2d, angular_dist, idx)
-
-        last_projected_planets = projected_planets
-
-        # Draw breadcrumb trail for XYZ modes
-        if visit_history:
-            trail_len = len(visit_history)
-            for trail_i, trail_idx in enumerate(visit_history):
-                trail_p4d = planets[trail_idx]
-                trail_rel = trail_p4d @ player_frame.T
-                trail_sx = int(center_x + trail_rel[1] * xyz_scale)
-                trail_sy = int(center_y + trail_rel[2] * xyz_scale)
-                if 0 <= trail_sx < view_width and 0 <= trail_sy < SCREEN_HEIGHT:
-                    fade = (trail_i + 1) / trail_len
-                    alpha = int(30 + fade * 100)
-                    dot_radius = 3 if fade > 0.5 else 2
-                    dot_surf = pygame.Surface((dot_radius * 2 + 4, dot_radius * 2 + 4), pygame.SRCALPHA)
-                    pygame.draw.circle(dot_surf, (180, 220, 255, alpha), (dot_radius + 2, dot_radius + 2), dot_radius)
-                    screen.blit(dot_surf, (trail_sx - dot_radius - 2, trail_sy - dot_radius - 2))
-
-    else:
-        # Standard tangent space projection (modes 0 and 1)
-        basis = [orientation[1], orientation[2], orientation[3]]
-        player_screen_offset = project_to_tangent(camera_pos, player_pos, basis)
-
-        projected_planets = []
-        for i, idx in enumerate(visible_indices):
-            p4d = planets[idx]
-            tangent_xyz = project_to_tangent(camera_pos, p4d, basis)
-            tangent_xyz[0] -= player_screen_offset[0]
-            tangent_xyz[1] -= player_screen_offset[1]
-            p2d, depth = project_tangent_to_screen(tangent_xyz, view_width, SCREEN_HEIGHT, scale=2500 * view_zoom)
-            angular_dist = visible_distances[i]
-            projected_planets.append((p2d, angular_dist, depth, idx))
-
-        # Sort by angular distance for painter's algorithm (farther first)
-        projected_planets.sort(key=lambda x: x[1], reverse=True)
-        last_projected_planets = projected_planets
-
-        for p2d, angular_dist, depth, idx in projected_planets:
-            if 0 <= p2d[0] < view_width and 0 <= p2d[1] < SCREEN_HEIGHT:
-                # Size and brightness based on angular distance from camera
-                max_distance = FOV_ANGLE
-                normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
-                radius = max(2, int((2 + normalized_dist * 5) * view_zoom))
-
-                if view_mode == 0:
-                    # Assigned color, modulate brightness by distance
-                    base_color = planet_colors[idx]
-                else:
-                    # Color from relative 4D direction (normalized for narrow FOV)
-                    rel = planets[idx] - camera_pos
-                    rel_norm = np.linalg.norm(rel)
-                    if rel_norm > 1e-8:
-                        rel = rel / rel_norm
-                    # Map unit direction xyzw to RGB: x→R, y→G, z→B, w→brightness
-                    r = int(max(0, min(255, (rel[0] + 1.0) * 127.5)))
-                    g = int(max(0, min(255, (rel[1] + 1.0) * 127.5)))
-                    b = int(max(0, min(255, (rel[2] + 1.0) * 127.5)))
-                    w_factor = 0.5 + 0.5 * max(0.0, min(1.0, (rel[3] + 1.0) / 2.0))
-                    base_color = (int(r * w_factor), int(g * w_factor), int(b * w_factor))
-
-                color = base_color
-                planet_display_colors[idx] = color
-
-                # Glow halo behind planet
-                glow_radius = int(radius * 2.5 + normalized_dist * 8)
-                glow_surf = pygame.Surface((glow_radius * 2 + 4, glow_radius * 2 + 4), pygame.SRCALPHA)
-                pygame.draw.circle(glow_surf, (*color, 60), (glow_radius + 2, glow_radius + 2), glow_radius)
-                screen.blit(glow_surf, (int(p2d[0]) - glow_radius - 2, int(p2d[1]) - glow_radius - 2))
-
-                # Render rotating planet; fall back to circle if not yet cached
-                equirect = get_planet_equirect(idx, _name_keys[idx])
-                if equirect is not None:
-                    rot = get_planet_rotation_angle(idx, elapsed_ms)
-                    sz = max(4, int(2 * radius))
-                    surf = render_planet_frame(equirect, sz, rot, tint_color=color)
-                    screen.blit(surf, (int(p2d[0]) - sz // 2, int(p2d[1]) - sz // 2))
-                else:
-                    pygame.draw.circle(screen, color, p2d.astype(int), radius)
-
-                # Inspection ring on currently inspected planet
-                if idx == inspected_planet_idx:
-                    ring_radius = radius + 10
-                    ring_surf = pygame.Surface((ring_radius * 2 + 4, ring_radius * 2 + 4), pygame.SRCALPHA)
-                    ring_color = (*color, 160)
-                    pygame.draw.circle(ring_surf, ring_color, (ring_radius + 2, ring_radius + 2), ring_radius, 2)
-                    screen.blit(ring_surf, (int(p2d[0]) - ring_radius - 2, int(p2d[1]) - ring_radius - 2))
-
-                # Check if mouse is near this planet (within radius + margin)
-                dx, dy = mx - p2d[0], my - p2d[1]
-                dist_sq = dx * dx + dy * dy
-                hit_radius = max(radius + 6, 10)
-                if dist_sq < hit_radius * hit_radius and dist_sq < hover_dist_sq_min:
-                    hover_dist_sq_min = dist_sq
-                    hover_planet = (p2d, angular_dist, idx)
-
-        # Draw breadcrumb trail: fading dots for recently visited planets
-        if visit_history:
-            trail_len = len(visit_history)
-            for trail_i, trail_idx in enumerate(visit_history):
-                trail_p4d = planets[trail_idx]
-                trail_tangent = project_to_tangent(camera_pos, trail_p4d, basis)
-                trail_tangent[0] -= player_screen_offset[0]
-                trail_tangent[1] -= player_screen_offset[1]
-                trail_p2d, trail_depth = project_tangent_to_screen(trail_tangent, view_width, SCREEN_HEIGHT, scale=2500 * view_zoom)
-                tx, ty = int(trail_p2d[0]), int(trail_p2d[1])
-                if 0 <= tx < view_width and 0 <= ty < SCREEN_HEIGHT:
-                    fade = (trail_i + 1) / trail_len
-                    alpha = int(30 + fade * 100)
-                    dot_radius = 3 if fade > 0.5 else 2
-                    dot_surf = pygame.Surface((dot_radius * 2 + 4, dot_radius * 2 + 4), pygame.SRCALPHA)
-                    pygame.draw.circle(dot_surf, (180, 220, 255, alpha), (dot_radius + 2, dot_radius + 2), dot_radius)
-                    screen.blit(dot_surf, (tx - dot_radius - 2, ty - dot_radius - 2))
+    # Draw breadcrumb trail
+    if visit_history:
+        trail_len = len(visit_history)
+        for trail_i, trail_idx in enumerate(visit_history):
+            trail_p4d = planets[trail_idx]
+            trail_rel = trail_p4d @ player_frame.T
+            trail_sx = int(center_x + trail_rel[1] * xyz_scale)
+            trail_sy = int(center_y + trail_rel[2] * xyz_scale)
+            if 0 <= trail_sx < view_width and 0 <= trail_sy < SCREEN_HEIGHT:
+                fade = (trail_i + 1) / trail_len
+                alpha = int(30 + fade * 100)
+                dot_radius = 3 if fade > 0.5 else 2
+                dot_surf = pygame.Surface((dot_radius * 2 + 4, dot_radius * 2 + 4), pygame.SRCALPHA)
+                pygame.draw.circle(dot_surf, (180, 220, 255, alpha), (dot_radius + 2, dot_radius + 2), dot_radius)
+                screen.blit(dot_surf, (trail_sx - dot_radius - 2, trail_sy - dot_radius - 2))
 
     # Draw white circle around hovered list item planet
     if hovered_item is not None and 0 <= hovered_item < len(filtered_indices):
@@ -1297,14 +1171,9 @@ while running:
             screen.blit(font.render("<<", True, (150, 150, 255)), (x_offset, y + 12))
 
     # Draw status and controls
-    mode_label = ["Assigned", "4D Position", "XYZ Projection", "XYZ Fixed-Y"][view_mode]
-    status = f"Visible: {len(visible_indices)} | View: {mode_label}"
+    status = f"Visible: {len(visible_indices)}"
     status_text = font.render(status, True, TEXT_COLOR)
     screen.blit(status_text, (10, 10))
-
-    # Compass widget — only in Assigned mode and when Gamepedia is closed
-    if view_mode == 0 and not gamepedia_open:
-        render_compass(screen, orientation, x=10, y=10, size=120)
 
     # Gamepedia overlay
     if gamepedia_open:
@@ -1476,7 +1345,7 @@ while running:
 
 try:
     save_game(player_pos, orientation, reputation_store, visited_planets,
-              visit_history, view_mode, view_zoom, xyz_w_angle)
+              visit_history, view_zoom=view_zoom, xyz_w_angle=xyz_w_angle)
 except Exception:
     pass
 cleanup_audio()
