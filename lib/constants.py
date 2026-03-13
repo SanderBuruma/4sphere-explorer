@@ -33,9 +33,6 @@ WEDGE_INNER = 15  # inner dead zone radius
 DIALOGUE_DURATION = 5000  # ms speech bubble display
 DIALOGUE_FADE = 1000      # ms fade-out at end
 
-# Starfield
-NUM_STARS = 200
-
 
 def distance_to_color(dist):
     """Map angular distance to RGB color gradient, scaled to FOV_ANGLE."""

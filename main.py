@@ -59,12 +59,6 @@ font_22 = pygame.font.Font(None, 26)
 font_28 = pygame.font.Font(None, 32)
 start_time = pygame.time.get_ticks()  # milliseconds since pygame init
 
-# Starfield: random 4D directions for parallax background
-_star_rng = np.random.default_rng(seed=123)
-_star_dirs = _star_rng.standard_normal((NUM_STARS, 4))
-_star_dirs /= np.linalg.norm(_star_dirs, axis=1, keepdims=True)
-_star_brightness = _star_rng.uniform(0.15, 0.6, NUM_STARS)
-_star_sizes = _star_rng.choice([1, 1, 1, 2], NUM_STARS)
 
 player_pos = np.array([1.0, 0.0, 0.0, 0.0])
 camera_pos = np.array([np.cos(CAMERA_OFFSET), 0.0, np.sin(CAMERA_OFFSET), 0.0])
@@ -264,26 +258,22 @@ while running:
     if not gamepedia_open:
         # Camera rotation via persistent orientation frame
         rotation_speed = ROTATION_SPEED
-        if view_mode == 3:
-            # XYZ Fixed-Y: only horizontal pan (A/D), Y stays locked to absolute [0,1,0,0]
+        if view_mode in (2, 3):
+            # XYZ modes: 4D-Golf-style rotation — W axis stays fixed for stable halo coloring
+            # A/D = yaw (horizontal pan), W/S = pitch (vertical tilt), Q/E = 4D depth rotation
+            # View frame is rebuilt from fixed absolute axes each frame, so only camera movement matters
             if keys[pygame.K_a]:
-                rotate_frame_tangent(orientation, 1, 3, -rotation_speed)
+                rotate_frame(orientation, 1, -rotation_speed)
             if keys[pygame.K_d]:
-                rotate_frame_tangent(orientation, 1, 3, rotation_speed)
-        elif view_mode == 2:
-            # XYZ view: rotate tangent basis only (camera stays fixed)
-            if keys[pygame.K_w]:  # tilt up (row 1, row 2 plane)
-                rotate_frame_tangent(orientation, 1, 2, -rotation_speed)
-            if keys[pygame.K_s]:  # tilt down
-                rotate_frame_tangent(orientation, 1, 2, rotation_speed)
-            if keys[pygame.K_a]:  # pan left (row 1, row 3 plane)
-                rotate_frame_tangent(orientation, 1, 3, -rotation_speed)
-            if keys[pygame.K_d]:  # pan right
-                rotate_frame_tangent(orientation, 1, 3, rotation_speed)
-            if keys[pygame.K_q]:  # roll (row 2, row 3 plane)
-                rotate_frame_tangent(orientation, 2, 3, rotation_speed)
-            if keys[pygame.K_e]:  # roll opposite
-                rotate_frame_tangent(orientation, 2, 3, -rotation_speed)
+                rotate_frame(orientation, 1, rotation_speed)
+            if keys[pygame.K_w]:
+                rotate_frame(orientation, 2, -rotation_speed)
+            if keys[pygame.K_s]:
+                rotate_frame(orientation, 2, rotation_speed)
+            if keys[pygame.K_q]:
+                rotate_frame(orientation, 3, rotation_speed)
+            if keys[pygame.K_e]:
+                rotate_frame(orientation, 3, -rotation_speed)
         else:
             if keys[pygame.K_w]:  # rotate up (screen Y)
                 rotate_frame(orientation, 2, -rotation_speed)
@@ -638,18 +628,7 @@ while running:
     # Render
     screen.fill(BG_COLOR)
 
-    # Render starfield with parallax from camera orientation
     view_width = SCREEN_WIDTH - 300
-    star_parallax_scale = 300
-    for si in range(NUM_STARS):
-        sx = np.dot(_star_dirs[si], orientation[1]) * star_parallax_scale
-        sy = np.dot(_star_dirs[si], orientation[2]) * star_parallax_scale
-        px = int((sx % view_width + view_width) % view_width)
-        py = int((sy % SCREEN_HEIGHT + SCREEN_HEIGHT) % SCREEN_HEIGHT)
-        if px < view_width:
-            c = int(_star_brightness[si] * 255)
-            pygame.draw.circle(screen, (c, c, int(c * 0.9)), (px, py), int(_star_sizes[si]))
-
     center_x, center_y = view_width // 2, SCREEN_HEIGHT // 2
 
     # Check mouse position for hover tooltip
@@ -664,6 +643,8 @@ while running:
     if view_mode in (2, 3):
         # XYZ Projection view: visible planets rendered by XYZ position relative to player, W→color
         # Build proper orthonormal frame centered on player (not camera)
+        # Build view frame from orientation, with Fixed-Y override for mode 3
+        # W-coloring uses absolute coordinates (rotation-invariant)
         player_frame = build_player_frame(player_pos, orientation)
 
         if view_mode == 3:
@@ -707,23 +688,23 @@ while running:
             if not (0 <= sx < view_width and 0 <= sy < SCREEN_HEIGHT):
                 continue
 
-            # W-halo color from 4th coordinate
-            w_color = w_to_color(max(-1.0, min(1.0, w_vals[vi] / FOV_ANGLE)))
+            # W-halo color from absolute W coordinate (rotation-invariant)
+            w_color = w_to_color(planets[idx][3])
 
             # Planet body uses its assigned color
             base_color = planet_colors[idx]
 
-            # Distance-based sizing (same as modes 0/1)
+            # Distance-based sizing (~3x smaller than modes 0/1 to avoid overlap)
             angular_dist = visible_distances[vi]
-            normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / FOV_ANGLE)))
-            radius = max(2, int((2 + normalized_dist * 5) * view_zoom))
+            normalized_dist = max(0.05, min(1.0, 1.0 - (angular_dist / FOV_ANGLE)))
+            radius = max(2, int((1 + normalized_dist * 2) * view_zoom))
 
             planet_display_colors[idx] = base_color
 
             # W-colored glow halo behind the planet
-            glow_radius = int(radius * 2.5 + normalized_dist * 8)
+            glow_radius = max(3, int(radius * 1.8 + normalized_dist * 4))
             glow_surf = pygame.Surface((glow_radius * 2 + 4, glow_radius * 2 + 4), pygame.SRCALPHA)
-            pygame.draw.circle(glow_surf, (*w_color, 60), (glow_radius + 2, glow_radius + 2), glow_radius)
+            pygame.draw.circle(glow_surf, (*w_color, 70), (glow_radius + 2, glow_radius + 2), glow_radius)
             screen.blit(glow_surf, (sx - glow_radius - 2, sy - glow_radius - 2))
 
             # Render rotating planet sprite; fall back to circle if not yet cached
@@ -738,7 +719,7 @@ while running:
 
             # Inspection ring on currently inspected planet
             if idx == inspected_planet_idx:
-                ring_radius = radius + 10
+                ring_radius = radius + 4
                 ring_surf = pygame.Surface((ring_radius * 2 + 4, ring_radius * 2 + 4), pygame.SRCALPHA)
                 ring_color = (*base_color, 160)
                 pygame.draw.circle(ring_surf, ring_color, (ring_radius + 2, ring_radius + 2), ring_radius, 2)

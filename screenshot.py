@@ -126,14 +126,6 @@ def load_planet_sprites():
 
 load_planet_sprites()
 
-# Starfield
-NUM_STARS = 200
-_star_rng = np.random.default_rng(seed=123)
-_star_dirs = _star_rng.standard_normal((NUM_STARS, 4))
-_star_dirs /= np.linalg.norm(_star_dirs, axis=1, keepdims=True)
-_star_brightness = _star_rng.uniform(0.15, 0.6, NUM_STARS)
-_star_sizes = _star_rng.choice([1, 1, 1, 2], NUM_STARS)
-
 
 def update_visible():
     global visible_indices, visible_distances
@@ -159,19 +151,6 @@ def render_frame():
     now = pygame.time.get_ticks()
 
     screen.fill(BG_COLOR)
-
-    # Starfield
-    basis = [orientation[1], orientation[2], orientation[3]]
-    for si in range(NUM_STARS):
-        sd = _star_dirs[si]
-        proj = np.array([np.dot(sd, b) for b in basis])
-        if proj[2] <= 0:
-            continue
-        sx = int(center_x + proj[0] / proj[2] * 400)
-        sy = int(center_y - proj[1] / proj[2] * 400)
-        if 0 <= sx < view_width and 0 <= sy < SCREEN_HEIGHT:
-            b = int(_star_brightness[si] * 255)
-            pygame.draw.circle(screen, (b, b, b), (sx, sy), int(_star_sizes[si]))
 
     # Build planet display colors dict for sidebar
     planet_display_colors = {}
