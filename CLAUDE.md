@@ -14,9 +14,11 @@ Python, Pygame, NumPy. Venv at `~/Projects/4sphere-explorer/venv`.
 - `lib/graphics.py` — Procedural creature generation (low-poly faceted, appendages, eyes)
 - `lib/planets.py` — Procedural rotating planets (two-tier equirect textures, background preload)
 - `lib/compass.py` — 4D compass widget: two great-circle rings (Y-axis blue, W-axis amber) projected from R⁴
-- `sphere.py` — S³ math (points, distance, slerp, tangent projection, orientation frame, names, colors)
+- `sphere.py` — S³ math (points, distance, slerp, tangent projection, orientation frame, fixed-Y frame, names, colors)
+- `lib/persistence.py` — Save/load game state to JSON (atomic writes, versioned format)
 - `audio.py` — Procedural techno ambient (10 timbres, 12 scales, proximity playback)
-- `tests/` — test_sphere (22), test_audio (17), test_planets (22), test_gamepedia (12), test_eye_tracking (12)
+- `screenshot.py` — Headless screenshot tool (SDL dummy drivers, scripted actions → output/)
+- `tests/` — test_sphere (47), test_dialogue (44), test_eye_tracking (41), test_reputation (29), test_planets (22), test_gamepedia (22), test_persistence (13), test_rotation (12), test_traits (10), test_audio (9)
 
 ## Key Parameters
 
@@ -25,6 +27,7 @@ Python, Pygame, NumPy. Venv at `~/Projects/4sphere-explorer/venv`.
 ## Architecture
 
 - **Orientation frame:** 4×4 orthogonal matrix (row 0 = camera, rows 1-3 = tangent basis). `rotate_frame()` applies planar rotations, `reorthogonalize_frame()` corrects drift via Gram-Schmidt from current frame vectors
+- **Fixed-Y frame (mode 3):** `build_fixed_y_frame(player_pos, w_angle)` computes frame directly from player position and a tracked angle, bypassing orientation hints. Guarantees uniform screen-space angular velocity for Q/E rotation. The `xyz_w_angle` state variable tracks the angle
 - **Tangent projection:** 3 basis vectors ⊥ camera in ℝ⁴, points projected onto basis scaled by angular distance
 - **Name keys:** `np.random.choice(11.8M, 30000, replace=False)` with seed 42 — deterministic, collision-free
 - **Lazy caching:** Creatures, names, planets cached with LRU eviction
@@ -34,11 +37,11 @@ Python, Pygame, NumPy. Venv at `~/Projects/4sphere-explorer/venv`.
 
 ## Controls
 
-W/S up/down, A/D left/right, Q/E 4D depth, V cycle view mode, Ctrl+/-/scroll zoom, UP/DOWN scroll list, drag rotate, click travel, F1 Gamepedia
+W/S up/down, A/D left/right, Q/E 4D depth, V cycle view mode, Ctrl+/-/scroll zoom, UP/DOWN scroll list, drag rotate, click travel, F1 Gamepedia. XYZ modes (2 & 3): WASD moves camera on S³, Q/E rotates view in tangent subspace (mode 3 uses direct angle tracking via `xyz_w_angle` for uniform speed; mode 2 Q/E has no visible effect). W axis stays fixed for stable halo coloring
 
 ## View Modes (V)
 
-0: Assigned (random HSV) | 1: 4D Position | 2: XYZ Projection | 3: XYZ Fixed-Y
+0: Assigned (random HSV) | 1: 4D Position | 2: XYZ Projection | 3: XYZ Fixed-Y. Modes 2 & 3 render planet sprites with W-colored halos (absolute W coordinate, rotation-invariant). Mode 3 Q/E rotates view into 4th dimension at uniform speed; angle resets on mode switch
 
 ## Rules
 

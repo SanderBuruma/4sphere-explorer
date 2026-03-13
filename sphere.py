@@ -195,6 +195,22 @@ def rotate_frame_tangent(frame, axis1, axis2, angle):
     frame[axis2] = -sin_a * v1 + cos_a * v2
 
 
+def cross4(a, b, c):
+    """4D cross product: the unit vector orthogonal to three vectors in R^4.
+
+    Given three linearly independent vectors a, b, c in R^4, returns the
+    unique unit vector orthogonal to all three such that det([a, b, c, result]) > 0.
+    Uses cofactor expansion (generalized cross product).
+    """
+    M = np.array([a, b, c])  # 3x4
+    result = np.empty(4)
+    signs = (1, -1, 1, -1)
+    for i in range(4):
+        result[i] = signs[i] * np.linalg.det(np.delete(M, i, axis=1))
+    norm = np.linalg.norm(result)
+    return result / norm
+
+
 def reorthogonalize_frame(frame):
     """Re-orthogonalize frame to correct numerical drift.
 
@@ -224,6 +240,45 @@ def build_player_frame(player_pos, orientation):
         for j in range(1, i):
             v -= np.dot(v, frame[j]) * frame[j]
         frame[i] = v / np.linalg.norm(v)
+    return frame
+
+
+def build_fixed_y_frame(player_pos, w_angle, fixed_up=None):
+    """Build orthonormal 4x4 frame with fixed Y-up and angle-based W rotation.
+
+    Computes a stable basis in the 2D tangent subspace orthogonal to both
+    player_pos and fixed_up, then rotates frame[1] and frame[3] by w_angle
+    in that plane. Produces perfectly uniform screen-space rotation.
+    """
+    if fixed_up is None:
+        fixed_up = np.array([0.0, 1.0, 0.0, 0.0])
+
+    frame = np.empty((4, 4))
+    frame[0] = player_pos / np.linalg.norm(player_pos)
+
+    # frame[2] = fixed up, orthogonalized against player
+    up = fixed_up - np.dot(fixed_up, frame[0]) * frame[0]
+    up /= np.linalg.norm(up)
+    frame[2] = up
+
+    # Compute two base vectors in the free 2D subspace
+    # Use W-axis [0,0,0,1] as reference; fall back to Z-axis if degenerate
+    base_w = np.array([0.0, 0.0, 0.0, 1.0])
+    base_w -= np.dot(base_w, frame[0]) * frame[0]
+    base_w -= np.dot(base_w, frame[2]) * frame[2]
+    bw_norm = np.linalg.norm(base_w)
+    if bw_norm < 1e-6:
+        base_w = np.array([0.0, 0.0, 1.0, 0.0])
+        base_w -= np.dot(base_w, frame[0]) * frame[0]
+        base_w -= np.dot(base_w, frame[2]) * frame[2]
+        bw_norm = np.linalg.norm(base_w)
+    base_w /= bw_norm
+    base_x = cross4(frame[0], base_w, frame[2])
+
+    # Rotate by w_angle in the (base_x, base_w) plane
+    cos_a, sin_a = np.cos(w_angle), np.sin(w_angle)
+    frame[1] = cos_a * base_x + sin_a * base_w
+    frame[3] = -sin_a * base_x + cos_a * base_w
     return frame
 
 

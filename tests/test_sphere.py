@@ -8,8 +8,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sphere import (
     angular_distance,
+    build_fixed_y_frame,
     build_player_frame,
     build_visibility_kdtree,
+    cross4,
     decode_name,
     project_to_tangent,
     query_visible_kdtree,
@@ -691,27 +693,9 @@ class TestFixedYFrame(unittest.TestCase):
             frame[i + 1] = basis[i]
         return frame
 
-    def _apply_fixed_up_override(self, player_frame, orientation):
-        """Reproduce the mode 3 frame override from main.py using absolute Y."""
-        up = self.FIXED_UP.copy()
-        up -= np.dot(up, player_frame[0]) * player_frame[0]
-        up_norm = np.linalg.norm(up)
-        if up_norm < 1e-8:
-            return False
-        up /= up_norm
-        player_frame[2] = up
-        v3 = orientation[3].copy()
-        v3 -= np.dot(v3, player_frame[0]) * player_frame[0]
-        v3 -= np.dot(v3, player_frame[2]) * player_frame[2]
-        v3 /= np.linalg.norm(v3)
-        player_frame[3] = v3
-        v1 = orientation[1].copy()
-        v1 -= np.dot(v1, player_frame[0]) * player_frame[0]
-        v1 -= np.dot(v1, player_frame[2]) * player_frame[2]
-        v1 -= np.dot(v1, player_frame[3]) * player_frame[3]
-        v1 /= np.linalg.norm(v1)
-        player_frame[1] = v1
-        return True
+    def _build_mode3_frame(self, player_pos, w_angle=0.0):
+        """Build mode 3 frame using build_fixed_y_frame."""
+        return build_fixed_y_frame(player_pos, w_angle, self.FIXED_UP)
 
     def test_row2_parallel_to_absolute_y(self):
         """Frame row 2 is always parallel to [0,1,0,0] projected orthogonal to player."""
@@ -721,16 +705,9 @@ class TestFixedYFrame(unittest.TestCase):
             player = rng.standard_normal(4)
             player[1] *= 0.3  # reduce Y component to avoid degeneracy
             player /= np.linalg.norm(player)
-            orientation = self._make_frame(player)
-            for _ in range(rng.integers(1, 8)):
-                axis1, axis2 = rng.choice([1, 2, 3], 2, replace=False)
-                angle = rng.uniform(-0.3, 0.3)
-                rotate_frame_tangent(orientation, int(axis1), int(axis2), angle)
-            reorthogonalize_frame(orientation)
+            w_angle = rng.uniform(0, 2 * np.pi)
 
-            player_frame = build_player_frame(player, orientation)
-            ok = self._apply_fixed_up_override(player_frame, orientation)
-            self.assertTrue(ok, "Fixed up vector degenerate")
+            player_frame = self._build_mode3_frame(player, w_angle)
 
             # Row 2 should be parallel to [0,1,0,0] projected orthogonal to player
             expected_up = self.FIXED_UP - np.dot(self.FIXED_UP, player_frame[0]) * player_frame[0]
@@ -740,32 +717,24 @@ class TestFixedYFrame(unittest.TestCase):
                 msg=f"Row 2 not parallel to absolute Y: dot={dot:.10f}")
 
     def test_frame_orthonormal_after_override(self):
-        """Frame remains orthonormal after the fixed-Y override."""
+        """Frame remains orthonormal with build_fixed_y_frame."""
         rng = np.random.default_rng(301)
         for _ in range(20):
             player = rng.standard_normal(4)
             player[1] *= 0.3
             player /= np.linalg.norm(player)
-            orientation = self._make_frame(player)
-            for _ in range(rng.integers(1, 6)):
-                axis1, axis2 = rng.choice([1, 2, 3], 2, replace=False)
-                angle = rng.uniform(-0.5, 0.5)
-                rotate_frame_tangent(orientation, int(axis1), int(axis2), angle)
-            reorthogonalize_frame(orientation)
+            w_angle = rng.uniform(0, 2 * np.pi)
 
-            player_frame = build_player_frame(player, orientation)
-            ok = self._apply_fixed_up_override(player_frame, orientation)
-            self.assertTrue(ok)
+            player_frame = self._build_mode3_frame(player, w_angle)
 
             product = player_frame @ player_frame.T
             np.testing.assert_allclose(product, np.eye(4), atol=1e-8,
-                err_msg="Frame not orthonormal after fixed-Y override")
+                err_msg="Frame not orthonormal from build_fixed_y_frame")
 
-    def test_screen_y_stable_under_horizontal_pan(self):
-        """Screen Y coords don't change when rotating with A/D (pan in row 1,3 plane)."""
+    def test_screen_y_stable_under_w_angle_change(self):
+        """Screen Y coords don't change when changing w_angle."""
         rng = np.random.default_rng(302)
         player = np.array([1.0, 0.0, 0.0, 0.0])
-        orientation = self._make_frame(player)
 
         test_points = []
         for _ in range(10):
@@ -775,19 +744,18 @@ class TestFixedYFrame(unittest.TestCase):
             p /= np.linalg.norm(p)
             test_points.append(p)
 
-        def get_screen_y_values(ori):
-            pf = build_player_frame(player, ori)
-            self._apply_fixed_up_override(pf, ori)
+        def get_screen_y_values(w_angle):
+            pf = self._build_mode3_frame(player, w_angle)
             return np.array([pt @ pf.T for pt in test_points])[:, 2]
 
-        y_before = get_screen_y_values(orientation)
-        for _ in range(10):
-            rotate_frame_tangent(orientation, 1, 3, 0.05)
-        reorthogonalize_frame(orientation)
-        y_after = get_screen_y_values(orientation)
+        y_at_0 = get_screen_y_values(0.0)
+        y_at_1 = get_screen_y_values(1.0)
+        y_at_pi = get_screen_y_values(np.pi)
 
-        np.testing.assert_allclose(y_before, y_after, atol=1e-6,
-            err_msg="Screen Y changed after horizontal pan (A/D)")
+        np.testing.assert_allclose(y_at_0, y_at_1, atol=1e-10,
+            err_msg="Screen Y changed with w_angle=1.0")
+        np.testing.assert_allclose(y_at_0, y_at_pi, atol=1e-10,
+            err_msg="Screen Y changed with w_angle=pi")
 
 
 if __name__ == "__main__":

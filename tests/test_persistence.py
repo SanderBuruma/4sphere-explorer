@@ -30,7 +30,7 @@ class TestSerializeDeserialize(unittest.TestCase):
     def test_round_trip(self):
         """serialize -> deserialize produces identical state."""
         pos, ori, rep, vis, hist = _make_state()
-        data = _serialize_state(pos, ori, rep, vis, hist, 2, 1.5)
+        data = _serialize_state(pos, ori, rep, vis, hist, 2, 1.5, 0.75)
         result = _deserialize_state(data)
         np.testing.assert_array_almost_equal(result["player_pos"], pos)
         np.testing.assert_array_almost_equal(result["orientation"], ori)
@@ -39,6 +39,7 @@ class TestSerializeDeserialize(unittest.TestCase):
         self.assertEqual(list(result["visit_history"]), list(hist))
         self.assertEqual(result["view_mode"], 2)
         self.assertAlmostEqual(result["view_zoom"], 1.5)
+        self.assertAlmostEqual(result["xyz_w_angle"], 0.75)
 
     def test_reputation_key_conversion(self):
         """Int keys -> string keys -> int keys survives round-trip."""

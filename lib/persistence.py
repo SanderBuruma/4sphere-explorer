@@ -16,7 +16,7 @@ REQUIRED_KEYS = {"version", "player_pos", "orientation", "reputation_store",
 
 
 def _serialize_state(player_pos, orientation, reputation_store, visited_planets,
-                     visit_history, view_mode, view_zoom):
+                     visit_history, view_mode, view_zoom, xyz_w_angle=0.0):
     """Build save dict from game state."""
     return {
         "version": SAVE_VERSION,
@@ -27,6 +27,7 @@ def _serialize_state(player_pos, orientation, reputation_store, visited_planets,
         "visit_history": list(visit_history),
         "view_mode": view_mode,
         "view_zoom": view_zoom,
+        "xyz_w_angle": xyz_w_angle,
     }
 
 
@@ -42,17 +43,20 @@ def _deserialize_state(data):
         "visit_history": deque(data["visit_history"], maxlen=50),
         "view_mode": data.get("view_mode", 0),
         "view_zoom": data.get("view_zoom", 1.0),
+        "xyz_w_angle": data.get("xyz_w_angle", 0.0),
     }
 
 
 def save_game(player_pos, orientation, reputation_store, visited_planets,
-              visit_history, view_mode=0, view_zoom=1.0, save_file=None):
+              visit_history, view_mode=0, view_zoom=1.0, xyz_w_angle=0.0,
+              save_file=None):
     """Serialize game state to JSON file. Atomic write via temp file + rename."""
     save_file = save_file or SAVE_FILE
     save_dir = os.path.dirname(save_file)
     os.makedirs(save_dir, exist_ok=True)
     data = _serialize_state(player_pos, orientation, reputation_store,
-                            visited_planets, visit_history, view_mode, view_zoom)
+                            visited_planets, visit_history, view_mode, view_zoom,
+                            xyz_w_angle)
     fd, tmp_path = tempfile.mkstemp(dir=save_dir, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:

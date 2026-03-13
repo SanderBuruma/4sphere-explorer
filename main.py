@@ -34,12 +34,14 @@ from sphere import (
     rotate_frame_tangent,
     reorthogonalize_frame,
     build_player_frame,
+    build_fixed_y_frame,
     project_to_tangent,
     project_tangent_to_screen,
     slerp,
     w_to_color,
     random_color,
     decode_name,
+    cross4,
     TOTAL_NAMES,
 )
 
@@ -180,6 +182,7 @@ hovered_item = None
 view_mode = 3  # 0 = assigned colors, 1 = relative 4D position colors, 2 = XYZ projection (W→color), 3 = XYZ Fixed-Y
 view_zoom = 1.0  # zoom level for all view modes
 XYZ_FIXED_UP = np.array([0.0, 1.0, 0.0, 0.0])  # absolute Y axis for mode 3
+xyz_w_angle = 0.0  # Q/E rotation angle for mode 3 (tangent-subspace, uniform)
 last_projected_planets = []  # store for click detection
 list_start_y = 100  # Y coordinate where planet list items begin (updated each frame)
 
@@ -242,6 +245,7 @@ if _save_data:
     visit_history = _save_data["visit_history"]
     view_mode = _save_data.get("view_mode", 3)
     view_zoom = _save_data.get("view_zoom", 1.0)
+    xyz_w_angle = _save_data.get("xyz_w_angle", 0.0)
     camera_pos = orientation[0]
 
 update_visible()
@@ -270,10 +274,11 @@ while running:
                 rotate_frame(orientation, 2, -rotation_speed)
             if keys[pygame.K_s]:
                 rotate_frame(orientation, 2, rotation_speed)
+            # Q/E: direct tangent-space angle (uniform speed, no camera movement)
             if keys[pygame.K_q]:
-                rotate_frame(orientation, 3, rotation_speed)
+                xyz_w_angle += rotation_speed
             if keys[pygame.K_e]:
-                rotate_frame(orientation, 3, -rotation_speed)
+                xyz_w_angle -= rotation_speed
         else:
             if keys[pygame.K_w]:  # rotate up (screen Y)
                 rotate_frame(orientation, 2, -rotation_speed)
@@ -310,7 +315,7 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             save_game(player_pos, orientation, reputation_store, visited_planets,
-                      visit_history, view_mode, view_zoom)
+                      visit_history, view_mode, view_zoom, xyz_w_angle)
             running = False
         elif event.type == pygame.KEYDOWN:
             if gamepedia_open:
@@ -380,6 +385,7 @@ while running:
                         menu_center = None
                 elif event.key == pygame.K_v:
                     view_mode = (view_mode + 1) % 4  # cycle 0/1/2/3
+                    xyz_w_angle = 0.0
                 elif event.key == pygame.K_SLASH or event.key == pygame.K_f:
                     search_active = True
                     search_text = ""
@@ -645,29 +651,10 @@ while running:
         # Build proper orthonormal frame centered on player (not camera)
         # Build view frame from orientation, with Fixed-Y override for mode 3
         # W-coloring uses absolute coordinates (rotation-invariant)
-        player_frame = build_player_frame(player_pos, orientation)
-
         if view_mode == 3:
-            # Override Y axis with absolute Y direction (orthogonalized against player)
-            up = XYZ_FIXED_UP.copy()
-            up -= np.dot(up, player_frame[0]) * player_frame[0]
-            up_norm = np.linalg.norm(up)
-            if up_norm > 1e-8:
-                up /= up_norm
-                player_frame[2] = up
-                # Re-derive row 3: orthogonalize orientation[3] against rows 0 and 2
-                v3 = orientation[3].copy()
-                v3 -= np.dot(v3, player_frame[0]) * player_frame[0]
-                v3 -= np.dot(v3, player_frame[2]) * player_frame[2]
-                v3 /= np.linalg.norm(v3)
-                player_frame[3] = v3
-                # Row 1 completes the orthonormal basis
-                v1 = orientation[1].copy()
-                v1 -= np.dot(v1, player_frame[0]) * player_frame[0]
-                v1 -= np.dot(v1, player_frame[2]) * player_frame[2]
-                v1 -= np.dot(v1, player_frame[3]) * player_frame[3]
-                v1 /= np.linalg.norm(v1)
-                player_frame[1] = v1
+            player_frame = build_fixed_y_frame(player_pos, xyz_w_angle)
+        else:
+            player_frame = build_player_frame(player_pos, orientation)
 
         vis_planets = planets[visible_indices]  # (M, 4)
         rel_vis = vis_planets @ player_frame.T  # columns: [along_player, basis1, basis2, basis3]
@@ -1489,7 +1476,7 @@ while running:
 
 try:
     save_game(player_pos, orientation, reputation_store, visited_planets,
-              visit_history, view_mode, view_zoom)
+              visit_history, view_mode, view_zoom, xyz_w_angle)
 except Exception:
     pass
 cleanup_audio()

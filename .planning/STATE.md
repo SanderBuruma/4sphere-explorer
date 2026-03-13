@@ -5,7 +5,7 @@ milestone_name: 4S Compass
 status: completed
 stopped_at: Completed 08-01-PLAN.md
 last_updated: "2026-03-12T18:43:00.000Z"
-last_activity: 2026-03-13 -- Completed quick task 6: Overhaul XYZ view modes with W-colored halos
+last_activity: 2026-03-13 -- Fix: uniform Q/E rotation in mode 3 via angle-based build_fixed_y_frame
 progress:
   total_phases: 2
   completed_phases: 2
@@ -85,7 +85,7 @@ Progress: [██████████] 100%
 
 ## Session Continuity
 
-**Last activity:** 2026-03-13 -- Completed quick task 6: Overhaul XYZ view modes with assigned-color sprites and W-colored halos
+**Last activity:** 2026-03-13 -- Fix: uniform Q/E rotation in mode 3 via angle-based build_fixed_y_frame
 **Next action:** /gsd:new-milestone to define next version
 
 ---

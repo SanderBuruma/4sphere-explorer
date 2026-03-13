@@ -37,7 +37,8 @@ XYZ Fixed-Y (default): Planets are plotted by their 3D position \
 with the vertical axis locked to an absolute "up" direction. Each \
 planet keeps its own assigned color, and a glowing halo around it \
 shows the hidden 4th coordinate (W): blue for negative W, white \
-near zero, red for positive W. Scroll to zoom.
+near zero, red for positive W. Use Q/E to rotate your view into \
+the 4th dimension. Scroll to zoom.
 
 XYZ Projection: Same spatial layout as Fixed-Y, but the axes rotate \
 freely with your camera. Planets keep their assigned colors with \

@@ -45,6 +45,7 @@ from sphere import (
     rotate_frame_tangent,
     reorthogonalize_frame,
     build_player_frame,
+    build_fixed_y_frame,
     project_to_tangent,
     project_tangent_to_screen,
     slerp,
@@ -156,27 +157,10 @@ def render_frame():
     planet_display_colors = {}
 
     if view_mode in (2, 3):
-        player_frame = build_player_frame(player_pos, orientation)
         if view_mode == 3:
-            # Override Y axis with absolute Y direction (orthogonalized against player)
-            XYZ_FIXED_UP = np.array([0.0, 1.0, 0.0, 0.0])
-            up = XYZ_FIXED_UP.copy()
-            up -= np.dot(up, player_frame[0]) * player_frame[0]
-            up_norm = np.linalg.norm(up)
-            if up_norm > 1e-8:
-                up /= up_norm
-                player_frame[2] = up
-                v3 = orientation[3].copy()
-                v3 -= np.dot(v3, player_frame[0]) * player_frame[0]
-                v3 -= np.dot(v3, player_frame[2]) * player_frame[2]
-                v3 /= np.linalg.norm(v3)
-                player_frame[3] = v3
-                v1 = orientation[1].copy()
-                v1 -= np.dot(v1, player_frame[0]) * player_frame[0]
-                v1 -= np.dot(v1, player_frame[2]) * player_frame[2]
-                v1 -= np.dot(v1, player_frame[3]) * player_frame[3]
-                v1 /= np.linalg.norm(v1)
-                player_frame[1] = v1
+            player_frame = build_fixed_y_frame(player_pos, 0.0)
+        else:
+            player_frame = build_player_frame(player_pos, orientation)
 
         vis_pts = planets[visible_indices]
         rel_vis = vis_pts @ player_frame.T
