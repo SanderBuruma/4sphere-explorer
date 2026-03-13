@@ -30,20 +30,25 @@ Drag anywhere in the viewport to rotate your view freely.
 
 Mouse wheel zooms in any view mode."""),
         ("View Modes", """\
-Press V to cycle through four coloring modes:
+Press V to cycle through four view modes. The game starts in XYZ \
+Fixed-Y mode by default.
 
-Assigned: Every planet keeps one random color forever. Good for \
-recognizing individual planets at a glance.
+XYZ Fixed-Y (default): Planets are plotted by their 3D position \
+with the vertical axis locked to an absolute "up" direction. Each \
+planet keeps its own assigned color, and a glowing halo around it \
+shows the hidden 4th coordinate (W): blue for negative W, white \
+near zero, red for positive W. Scroll to zoom.
+
+XYZ Projection: Same spatial layout as Fixed-Y, but the axes rotate \
+freely with your camera. Planets keep their assigned colors with \
+W-colored halos, just like Fixed-Y mode.
+
+Assigned: Every planet keeps one random color forever, rendered as \
+rotating sprites with glow halos. Good for recognizing individual \
+planets at a glance. The compass widget is only visible in this mode.
 
 4D Position: Color is computed from the direction to each planet in \
-4D space. Nearby planets look similar; far-away planets look different.
-
-XYZ Projection: Planets are plotted by their 3D position relative to \
-you. The hidden 4th coordinate (W) becomes a blue-to-white-to-red \
-color gradient. Scroll to zoom.
-
-XYZ Fixed-Y: Same as XYZ Projection, but the vertical axis is locked \
-to an absolute "up" direction instead of rotating with you."""),
+4D space. Nearby planets look similar; far-away planets look different."""),
     ]),
     ("Navigation", [
         ("Travel & Slerp", """\
@@ -101,11 +106,15 @@ In Assigned mode every planet picks a random HSV color at startup and \
 keeps it forever. In 4D Position mode, the color is computed from the \
 relative direction vector in 4D — similar directions get similar hues.
 
-In the two XYZ modes, the 4th coordinate (W) maps to a gradient: \
-blue for negative W, white near zero, red for positive.
+In the two XYZ modes, each planet keeps its own assigned color for \
+the body and sprite. The glowing halo around each planet shows the \
+4th coordinate (W): blue for negative W, white near zero, red for \
+positive W. This separates planet identity (body color) from spatial \
+information (halo color), so you can recognize planets while still \
+reading depth in the 4th dimension.
 
 Whichever mode you're in, the sidebar, tooltip, and detail panel all \
-use the exact same color as the viewport dot."""),
+use the planet's body color."""),
         ("Creatures", """\
 Every planet has a unique creature avatar. You'll see it in the sidebar \
 next to each name, in hover tooltips, and at large size in the detail panel.
