@@ -1,5 +1,7 @@
 """Game constants, colors, and utility functions."""
 
+import math
+
 # Display
 SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 800
 
@@ -16,6 +18,7 @@ LIST_ITEM_HOVER = (80, 80, 120)
 # Game
 NUM_PLANETS = 30_000
 FOV_ANGLE = 0.116  # radians, tuned for ~10 visible planets
+SIZE_FOV = math.pi / 4  # 45 degrees — reference angle for planet sizing (wider than visibility FOV)
 GAME_SEED = 42
 ARRIVAL_THRESHOLD = 0.0005  # radians (0.5 mrad) — snap to target when this close
 CAMERA_OFFSET = 0.08  # radians — camera orbital distance from player
@@ -52,3 +55,24 @@ def format_dist(rad):
     if rad < 1.0:
         return f"{rad * 1000:.0f} mrad"
     return f"{rad:.2f} rad"
+
+
+def compute_planet_size(angular_dist, w_dist, fov_angle=SIZE_FOV, zoom=1.0):
+    """Compute planet display sizes from angular and W distances.
+
+    Returns (radius, sprite_size, glow_radius) as floats.
+    """
+    # Angular proximity: 1.0 at camera, 0.0 at FOV edge
+    t = max(0.0, 1.0 - (angular_dist / fov_angle))
+
+    # W-depth factor: 1.0 at same W, 0.4 at max W offset within FOV
+    w_norm = min(1.0, w_dist / math.sin(fov_angle))
+    w_factor = 1.0 - 0.6 * w_norm
+
+    size_factor = t * w_factor
+
+    radius = max(1.5, (1.5 + size_factor * 6.5) * zoom)
+    sprite_size = max(4.0, 2.0 * radius)
+    glow_radius = max(3.0, radius * 1.6 + size_factor * 5.0)
+
+    return radius, sprite_size, glow_radius

@@ -89,19 +89,18 @@ Planets spin slowly (one full rotation every 20 seconds) with a \
 per-planet phase offset so they're not all synchronized. The detail \
 panel (hold-click > Info) shows a larger spinning version."""),
         ("Colors & View Modes", """\
-In Assigned mode every planet picks a random HSV color at startup and \
-keeps it forever. In 4D Position mode, the color is computed from the \
-relative direction vector in 4D — similar directions get similar hues.
+Each planet keeps its own assigned color for the body and sprite. \
+The glowing halo around each planet shows the 4th coordinate (W): \
+blue for negative W, white near zero, red for positive W. This \
+separates planet identity (body color) from spatial information \
+(halo color), so you can recognize planets while still reading \
+depth in the 4th dimension.
 
-In the two XYZ modes, each planet keeps its own assigned color for \
-the body and sprite. The glowing halo around each planet shows the \
-4th coordinate (W): blue for negative W, white near zero, red for \
-positive W. This separates planet identity (body color) from spatial \
-information (halo color), so you can recognize planets while still \
-reading depth in the 4th dimension.
+Planets closer in the 4th dimension appear larger; those far away \
+in W shrink, giving a sense of 4D depth. Size also varies smoothly \
+with angular distance — nearby planets are bigger, distant ones smaller.
 
-Whichever mode you're in, the sidebar, tooltip, and detail panel all \
-use the planet's body color."""),
+The sidebar, tooltip, and detail panel all use the planet's body color."""),
         ("Creatures", """\
 Every planet has a unique creature avatar. You'll see it in the sidebar \
 next to each name, in hover tooltips, and at large size in the detail panel.

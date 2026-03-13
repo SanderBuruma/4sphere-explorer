@@ -622,17 +622,29 @@ while running:
     planet_display_colors = {}
 
     # XYZ Fixed-Y view: planets rendered by XYZ position relative to player, W→halo color
-    # W-coloring uses absolute coordinates (rotation-invariant)
+    # W-coloring uses un-rotated base_w projection (rotation-invariant)
     player_frame = build_fixed_y_frame(player_pos, xyz_w_angle)
 
     vis_planets = planets[visible_indices]  # (M, 4)
     rel_vis = vis_planets @ player_frame.T  # columns: [along_player, basis1, basis2, basis3]
 
+    # Camera-to-planet distances for sizing (camera != player due to CAMERA_OFFSET)
+    camera_dots = np.clip(vis_planets @ camera_pos, -1.0, 1.0)
+    camera_dists = np.arccos(camera_dots)
+
+    # Player-to-planet distances for display (tooltip, panel, sidebar all use player dist)
+    player_dots = np.clip(vis_planets @ player_pos, -1.0, 1.0)
+    player_dists = np.arccos(player_dots)
+
     # Screen mapping: basis1→X, basis2→Y, basis3(W-like)→color
     xyz_scale = min(view_width, SCREEN_HEIGHT) * 0.4 * view_zoom
     screen_x = (center_x + rel_vis[:, 1] * xyz_scale).astype(int)
     screen_y = (center_y + rel_vis[:, 2] * xyz_scale).astype(int)
-    w_vals = rel_vis[:, 3]  # the 4th dimension relative to player
+    # Un-rotate frame[1]/frame[3] to get rotation-invariant W projection
+    # (base_w_proj doesn't change when xyz_w_angle changes)
+    cos_a = np.cos(xyz_w_angle)
+    sin_a = np.sin(xyz_w_angle)
+    w_vals = sin_a * rel_vis[:, 1] + cos_a * rel_vis[:, 3]
 
     # Sort by distance from player (farthest first for painter's algorithm)
     sort_order = np.argsort(rel_vis[:, 0])  # ascending = farthest first
@@ -644,21 +656,23 @@ while running:
         if not (0 <= sx < view_width and 0 <= sy < SCREEN_HEIGHT):
             continue
 
-        # W-halo color from absolute W coordinate (rotation-invariant)
-        w_color = w_to_color(planets[idx][3])
+        # W-halo color from relative W distance, normalized so FOV edge = fully blue/red
+        w_color = w_to_color(max(-1.0, min(1.0, w_vals[vi] / FOV_ANGLE)))
 
         # Planet body uses its assigned color
         base_color = planet_colors[idx]
 
-        # Distance-based sizing
-        angular_dist = visible_distances[vi]
-        normalized_dist = max(0.05, min(1.0, 1.0 - (angular_dist / FOV_ANGLE)))
-        radius = max(2, int((1 + normalized_dist * 2) * view_zoom))
+        # Distance-based sizing (smooth, W-depth-dependent, from camera not player)
+        angular_dist = camera_dists[vi]
+        player_dist = player_dists[vi]
+        w_dist = abs(w_vals[vi])
+        radius_f, sz_f, glow_radius_f = compute_planet_size(angular_dist, w_dist, SIZE_FOV, view_zoom)
+        radius = max(2, int(round(radius_f)))
 
         planet_display_colors[idx] = base_color
 
         # W-colored glow halo behind the planet
-        glow_radius = max(3, int(radius * 1.8 + normalized_dist * 4))
+        glow_radius = max(3, int(round(glow_radius_f)))
         glow_surf = pygame.Surface((glow_radius * 2 + 4, glow_radius * 2 + 4), pygame.SRCALPHA)
         pygame.draw.circle(glow_surf, (*w_color, 70), (glow_radius + 2, glow_radius + 2), glow_radius)
         screen.blit(glow_surf, (sx - glow_radius - 2, sy - glow_radius - 2))
@@ -667,7 +681,7 @@ while running:
         equirect = get_planet_equirect(idx, _name_keys[idx])
         if equirect is not None:
             rot = get_planet_rotation_angle(idx, elapsed_ms)
-            sz = max(4, int(2 * radius))
+            sz = max(4, int(round(sz_f)))
             surf = render_planet_frame(equirect, sz, rot, tint_color=base_color)
             screen.blit(surf, (sx - sz // 2, sy - sz // 2))
         else:
@@ -682,7 +696,7 @@ while running:
             screen.blit(ring_surf, (sx - ring_radius - 2, sy - ring_radius - 2))
 
         p2d = np.array([float(sx), float(sy)])
-        projected_planets.append((p2d, angular_dist, 0.0, idx))
+        projected_planets.append((p2d, player_dist, abs(w_vals[vi]), idx))
 
         # Hover detection
         dx, dy = mx - sx, my - sy
@@ -690,7 +704,7 @@ while running:
         hit_radius = max(radius + 6, 10)
         if dist_sq < hit_radius * hit_radius and dist_sq < hover_dist_sq_min:
             hover_dist_sq_min = dist_sq
-            hover_planet = (p2d, angular_dist, idx)
+            hover_planet = (p2d, player_dist, idx)
 
     last_projected_planets = projected_planets
 
@@ -716,9 +730,8 @@ while running:
         for p2d, angular_dist, depth, idx in projected_planets:
             if idx == hovered_planet_idx:
                 # Draw 50% transparent white circle outline around the planet
-                max_distance = FOV_ANGLE
-                normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
-                radius = max(2, int((2 + normalized_dist * 5) * view_zoom))
+                radius_f, _, _ = compute_planet_size(angular_dist, depth, SIZE_FOV, view_zoom)
+                radius = max(2, int(round(radius_f)))
                 circle_radius = radius + 8
                 # Create temporary surface for transparent circle
                 temp_surf = pygame.Surface((circle_radius * 2 + 4, circle_radius * 2 + 4), pygame.SRCALPHA)
@@ -736,9 +749,8 @@ while running:
             progress = elapsed_pop / POP_DURATION
             for p2d, angular_dist, depth, idx in projected_planets:
                 if idx == pop_animation_idx:
-                    max_distance = FOV_ANGLE
-                    normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
-                    base_radius = max(2, int((2 + normalized_dist * 5) * view_zoom))
+                    radius_f, _, _ = compute_planet_size(angular_dist, depth, SIZE_FOV, view_zoom)
+                    base_radius = max(2, int(round(radius_f)))
                     expand_radius = base_radius + int(progress * 20)
                     alpha = int(255 * (1 - progress))
                     temp_surf = pygame.Surface((expand_radius * 2 + 4, expand_radius * 2 + 4), pygame.SRCALPHA)
@@ -784,9 +796,8 @@ while running:
             if idx == travel_target_idx:
                 elapsed_ms = pygame.time.get_ticks() - start_time
                 rotation_angle = (elapsed_ms / TRIANGLE_PERIOD) * 2 * np.pi
-                max_distance = FOV_ANGLE
-                normalized_dist = max(0.1, min(1.0, 1.0 - (angular_dist / max_distance)))
-                radius = int(2 + normalized_dist * 5)
+                radius_f, _, _ = compute_planet_size(angular_dist, depth, SIZE_FOV, view_zoom)
+                radius = max(2, int(round(radius_f)))
                 arrow_distance = radius + 12
                 triangle_size = 5
 
